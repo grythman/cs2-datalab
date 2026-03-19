@@ -1,0 +1,90 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: cs2_n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - ./videos:/home/node/.n8n-files/videos
+      - ./videos:/data/videos
+      - ./n8n:/home/node/.n8n
+      - ./scripts:/workspace/scripts
+      - /home/linuxuser/cs2-datalab:/home/linuxuser/cs2-datalab
+    environment:
+      - WEBHOOK_URL=https://mr.itzuun.works/
+      - N8N_EDITOR_BASE_URL=https://mr.itzuun.works/
+      - N8N_BLOCK_FS_WRITE_ACCESS=false
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n_user
+      - DB_POSTGRESDB_PASSWORD=n8n_password
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      - N8N_TRUST_PROXY=true
+    depends_on:
+      - postgres
+    networks:
+      - internal
+
+  postgres:
+    image: postgres:15
+    container_name: cs2_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=n8n_user
+      - POSTGRES_PASSWORD=n8n_password
+      - POSTGRES_DB=n8n
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  parser:
+    build:
+      context: .
+      dockerfile: ./parser/Dockerfile
+    container_name: cs2_parser
+    restart: unless-stopped
+    volumes:
+      - ./raw:/data/raw
+      - ./parsed:/data/parsed
+      - ./visuals:/data/visuals
+      - ./scripts:/data/scripts
+    working_dir: /app
+    networks:
+      - internal
+
+  analyzer:
+    build: ./analyzer
+    container_name: cs2_analyzer
+    volumes:
+      - ./parsed:/data/parsed
+      - ./features:/data/features
+      - ./scripts:/data/scripts
+    networks:
+      - internal
+    ports:
+      - "8002:8002"
+
+  generator:
+    build:
+      context: .
+      dockerfile: ./generator/Dockerfile
+    container_name: cs2_generator
+    restart: unless-stopped
+    command: sh -c "cd generator && uvicorn main:app --host 0.0.0.0 --port 8001"
+    volumes:
+      - ./visuals:/data/visuals
+      - ./videos:/data/videos
+      - ./scripts:/data/scripts
+      - ./parsed:/data/parsed
+    networks:
+      - internal
+    ports:
+      - "8001:8001"
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+demoparser2
+pandas
+playwright
+matplotlib

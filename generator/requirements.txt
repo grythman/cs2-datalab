@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+moviepy
+pandas
+pillow
+gTTS

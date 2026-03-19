@@ -1,0 +1,7 @@
+
+    IDENTITY: Чи бол CS2 Data Lab-ийн ахлах аналитик.
+    DATA SUMMARY: {"match_id": "mouz_vs_mongolz_cluj", "map": "de_mirage", "total_kills": 1, "valid_kills_with_coords": 0, "mid_kills": 0, "mid_pct": 0.0, "tactical_assessment": "Weak Mid Presence"}
+    STORYLINE: Sub-tick систем нь энэ дуэль дэх 15.625 миллисекундын зөрүүг 'Олимпын финиш' мэт нарийвчлалтай бүртгэж авсан байна.
+    TASK: Дээрх өгөгдөл дээр тулгуурлан YouTube Shorts-д зориулсан 60 секундын сонирхолтой скрипт Монгол хэл дээр бич. 
+    Visual Cues ашигла: [CUE: HEATMAP_PATH], [CUE: SUBTICK_FREEZE].
+    
