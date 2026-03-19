@@ -29,10 +29,10 @@ def main():
         mid_kills = 0
         valid_kills = 0
         
-        for k in kills:
+        for k in (kills[0][1] if kills and len(kills[0]) > 1 else []):
             if isinstance(k, dict):
-                x = k.get('x')
-                y = k.get('y')
+                x = k.get('attacker_X')
+                y = k.get('attacker_Y')
                 
                 if x is not None and y is not None:
                     try:
