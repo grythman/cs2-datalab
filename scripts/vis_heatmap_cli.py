@@ -2,6 +2,8 @@
 import sys, os, json
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from scipy.ndimage import gaussian_filter
 from PIL import Image
 
 MAP_PARAMS = {
@@ -15,14 +17,22 @@ MAP_PARAMS = {
     "de_vertigo": {"pos_x": -3168, "pos_y": 1762,  "scale": 4.0},
 }
 
+TEAM_PLAYERS = {
+    "Mongolz": {"910", "Techno4K", "bLitz", "cobrazera", "mzinho"},
+    "mouz":    {"Brollan", "Jimpphat", "Spinx", "torzsi", "xertioN"},
+}
+
 def world_to_radar(wx, wy, pos_x, pos_y, scale):
-    rx = (wx - pos_x) / scale
-    ry = (pos_y - wy) / scale
-    return rx, ry
+    return (wx - pos_x) / scale, (pos_y - wy) / scale
+
+def get_team(name):
+    for team, players in TEAM_PLAYERS.items():
+        if name in players:
+            return team
+    return "Unknown"
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: vis_heatmap_cli.py <input.json> <map.png> <output.png>")
         sys.exit(2)
 
     input_file, map_file, output_file = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -36,43 +46,70 @@ def main():
     raw = data.get('kills', [])
     kills = raw[0][1] if raw and isinstance(raw[0], list) and len(raw[0]) > 1 else raw
 
-    x_coords, y_coords = [], []
+    mongolz_x, mongolz_y = [], []
+    mouz_x, mouz_y = [], []
+    all_x, all_y = [], []
+
     for k in kills:
-        if isinstance(k, dict):
-            wx = k.get('attacker_X') or k.get('attacker_x')
-            wy = k.get('attacker_Y') or k.get('attacker_y')
-            if wx is not None and wy is not None:
-                try:
-                    rx, ry = world_to_radar(float(wx), float(wy),
-                                            params['pos_x'], params['pos_y'], params['scale'])
-                    x_coords.append(rx)
-                    y_coords.append(ry)
-                except ValueError:
-                    pass
+        if not isinstance(k, dict):
+            continue
+        wx = k.get('attacker_X') or k.get('attacker_x')
+        wy = k.get('attacker_Y') or k.get('attacker_y')
+        name = k.get('attacker_name', '')
+        if wx is None or wy is None:
+            continue
+        try:
+            rx, ry = world_to_radar(float(wx), float(wy),
+                                    params['pos_x'], params['pos_y'], params['scale'])
+            all_x.append(rx)
+            all_y.append(ry)
+            team = get_team(name)
+            if team == "Mongolz":
+                mongolz_x.append(rx)
+                mongolz_y.append(ry)
+            elif team == "mouz":
+                mouz_x.append(rx)
+                mouz_y.append(ry)
+        except ValueError:
+            pass
+
+    if os.path.exists(map_file):
+        img = Image.open(map_file).convert("RGBA")
+        w, h = img.size
+    else:
+        w, h = 1024, 1024
+        img = None
 
     fig, ax = plt.subplots(figsize=(10, 10))
     fig.patch.set_facecolor('#1e1e1e')
     ax.set_facecolor('#1e1e1e')
 
-    if os.path.exists(map_file):
-        img = Image.open(map_file).convert("RGBA")
-        w, h = img.size
-        ax.imshow(img, extent=[0, w, h, 0])
-        ax.set_xlim(0, w)
-        ax.set_ylim(h, 0)
-    else:
-        ax.set_xlim(0, 1024)
-        ax.set_ylim(1024, 0)
-        w, h = 1024, 1024
+    if img:
+        ax.imshow(img, extent=[0, w, h, 0], zorder=1)
 
-    if x_coords and y_coords:
-        ax.hexbin(x_coords, y_coords, gridsize=40, cmap='inferno',
-                  mincnt=1, alpha=0.75, extent=[0, w, 0, h])
-    else:
-        ax.text(0.5, 0.5, 'No valid coordinates found',
-                color='white', ha='center', va='center', transform=ax.transAxes)
+    ax.set_xlim(0, w)
+    ax.set_ylim(h, 0)
 
-    ax.set_title(f"Match Heatmap - {len(x_coords)} Events", color='white')
+    if len(all_x) > 1:
+        heatmap, _, _ = np.histogram2d(all_x, all_y, bins=60,
+                                        range=[[0, w], [0, h]])
+        heatmap = gaussian_filter(heatmap.T, sigma=2.5)
+        heatmap[heatmap < heatmap.max() * 0.05] = np.nan
+        cmap = LinearSegmentedColormap.from_list(
+            'cs2heat', ['#0000AA', '#00CCFF', '#00FF00', '#FFFF00', '#FF0000'], N=256)
+        ax.imshow(heatmap, extent=[0, w, h, 0], origin='upper',
+                  cmap=cmap, alpha=0.55, zorder=2, aspect='auto')
+
+    # Текст legend — цэгийн оронд
+    ax.text(w - 20, 30, f'🟡 Mongolz  {len(mongolz_x)} kill',
+            color='#FFD700', fontsize=12, ha='right', va='top',
+            bbox=dict(facecolor='#1e1e1e', alpha=0.7, edgecolor='none'))
+    ax.text(w - 20, 65, f'🔴 mouz  {len(mouz_x)} kill',
+            color='#FF4444', fontsize=12, ha='right', va='top',
+            bbox=dict(facecolor='#1e1e1e', alpha=0.7, edgecolor='none'))
+
+    ax.set_title(f"Kill Heatmap — {len(all_x)} kills  |  Mongolz vs mouz",
+                 color='white', fontsize=13, pad=10)
     ax.axis('off')
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)

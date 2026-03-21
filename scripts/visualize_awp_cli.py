@@ -14,12 +14,22 @@ MAP_PARAMS = {
     "de_vertigo": {"pos_x": -3168, "pos_y": 1762, "scale": 4.0},
 }
 
+TEAM_PLAYERS = {
+    "Mongolz": {"910", "Techno4K", "bLitz", "cobrazera", "mzinho"},
+    "mouz":    {"Brollan", "Jimpphat", "Spinx", "torzsi", "xertioN"},
+}
+
 def world_to_radar(wx, wy, pos_x, pos_y, scale):
     return (wx - pos_x) / scale, (pos_y - wy) / scale
 
+def get_team(name):
+    for team, players in TEAM_PLAYERS.items():
+        if name in players:
+            return team
+    return "Unknown"
+
 def main():
     if len(sys.argv) < 3:
-        print("Usage: visualize_awp_cli.py <input.json> <output.png>")
         sys.exit(2)
 
     json_path, output_path = sys.argv[1], sys.argv[2]
@@ -33,10 +43,31 @@ def main():
     raw = data.get('kills', [])
     kills = raw[0][1] if raw and isinstance(raw[0], list) and len(raw[0]) > 1 else raw
 
-    awp_kills = [k for k in kills if isinstance(k, dict) and k.get('weapon') == 'awp']
+    mongolz_x, mongolz_y = [], []
+    mouz_x, mouz_y = [], []
+
+    for k in kills:
+        if not isinstance(k, dict) or k.get('weapon') != 'awp':
+            continue
+        wx = k.get('attacker_X') or k.get('attacker_x')
+        wy = k.get('attacker_Y') or k.get('attacker_y')
+        name = k.get('attacker_name', '')
+        if wx is None or wy is None:
+            continue
+        try:
+            rx, ry = world_to_radar(float(wx), float(wy),
+                                    params['pos_x'], params['pos_y'], params['scale'])
+            team = get_team(name)
+            if team == "Mongolz":
+                mongolz_x.append(rx)
+                mongolz_y.append(ry)
+            elif team == "mouz":
+                mouz_x.append(rx)
+                mouz_y.append(ry)
+        except ValueError:
+            pass
 
     map_file = f"/data/scripts/maps/{map_name}.png"
-
     fig, ax = plt.subplots(figsize=(10, 10))
     fig.patch.set_facecolor('#1e1e1e')
     ax.set_facecolor('#1e1e1e')
@@ -45,29 +76,33 @@ def main():
         img = Image.open(map_file).convert("RGBA")
         w, h = img.size
         ax.imshow(img, extent=[0, w, h, 0])
-        ax.set_xlim(0, w)
-        ax.set_ylim(h, 0)
     else:
         w, h = 1024, 1024
-        ax.set_xlim(0, w)
-        ax.set_ylim(h, 0)
 
-    if awp_kills:
-        xs, ys = [], []
-        for k in awp_kills:
-            wx = k.get('attacker_X') or k.get('attacker_x')
-            wy = k.get('attacker_Y') or k.get('attacker_y')
-            if wx is not None and wy is not None:
-                rx, ry = world_to_radar(float(wx), float(wy),
-                                        params['pos_x'], params['pos_y'], params['scale'])
-                xs.append(rx)
-                ys.append(ry)
-        if xs:
-            ax.scatter(xs, ys, c='red', s=120, alpha=0.85,
-                      edgecolors='white', linewidths=0.8, label='AWP kill')
-            ax.legend(facecolor='#333', labelcolor='white')
+    ax.set_xlim(0, w)
+    ax.set_ylim(h, 0)
 
-    ax.set_title(f"AWP Positions - {len(awp_kills)} kills", color='white')
+    if mongolz_x:
+        ax.scatter(mongolz_x, mongolz_y, c='#FFD700', s=150, alpha=0.9,
+                   edgecolors='white', linewidths=0.8,
+                   label=f'Mongolz ({len(mongolz_x)})', zorder=3, marker='*')
+    if mouz_x:
+        ax.scatter(mouz_x, mouz_y, c='#FF4444', s=120, alpha=0.9,
+                   edgecolors='white', linewidths=0.8,
+                   label=f'mouz ({len(mouz_x)})', zorder=3, marker='*')
+
+    total = len(mongolz_x) + len(mouz_x)
+
+    # Текст legend
+    ax.text(w - 20, 30, f'★ Mongolz  {len(mongolz_x)} AWP kill',
+            color='#FFD700', fontsize=12, ha='right', va='top',
+            bbox=dict(facecolor='#1e1e1e', alpha=0.7, edgecolor='none'))
+    ax.text(w - 20, 65, f'★ mouz  {len(mouz_x)} AWP kill',
+            color='#FF4444', fontsize=12, ha='right', va='top',
+            bbox=dict(facecolor='#1e1e1e', alpha=0.7, edgecolor='none'))
+
+    ax.set_title(f"AWP Positions — {total} kills  |  Mongolz vs mouz",
+                 color='white', fontsize=13, pad=10)
     ax.axis('off')
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
