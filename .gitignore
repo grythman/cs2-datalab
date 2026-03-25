@@ -32,4 +32,11 @@ build/
 *.csv
 *.parquet
 *.db
-videos/*.mp4
+
+# Exclude all media files
+videos/
+!videos/.gitkeep
+
+# Exclude database files
+postgres_data/
+postgres/
