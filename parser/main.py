@@ -1,11 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import os
-import json
-import subprocess
-import glob
-import shutil
-import asyncio
+import os, json, subprocess, glob, shutil, asyncio
 from playwright.async_api import async_playwright
 from demoparser2 import DemoParser
 import pandas as pd
@@ -45,7 +40,6 @@ async def process_match(req: ProcessRequest):
 
     raw_rar_path = f"{raw_dir}/{req.filename}.rar"
     extract_dir = f"{raw_dir}/{req.filename}_extracted"
-
     if os.path.exists(raw_rar_path): os.remove(raw_rar_path)
     if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
     os.makedirs(extract_dir, exist_ok=True)
@@ -76,6 +70,14 @@ async def process_match(req: ProcessRequest):
             kills_data = force_to_json_friendly(
                 parser.parse_events(["player_death"], player=["X", "Y"])
             )
+            # Economy өгөгдөл
+            economy_data = force_to_json_friendly(
+                parser.parse_events(["player_spawn"],
+                                    player=["current_equip_value", "cash"])
+            )
+            round_end_data = force_to_json_friendly(
+                parser.parse_events(["round_end"])
+            )
 
             if isinstance(header_data, list) and len(header_data) > 0:
                 header_data = header_data[0]
@@ -88,7 +90,9 @@ async def process_match(req: ProcessRequest):
                     "match_id": req.filename,
                     "map": map_name,
                     "header": header_data,
-                    "kills": kills_data
+                    "kills": kills_data,
+                    "economy": economy_data,
+                    "round_end": round_end_data
                 }, f, ensure_ascii=False, indent=4)
 
             processed_maps.append(map_name)

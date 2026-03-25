@@ -32,3 +32,4 @@ build/
 *.csv
 *.parquet
 *.db
+videos/*.mp4
