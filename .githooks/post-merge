@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  exit 0
+fi
+
+CHANGED_FILES="$(git diff-tree -r --no-commit-id --name-only ORIG_HEAD HEAD || true)"
+
+if ! printf '%s\n' "$CHANGED_FILES" | grep -Eq '^(generator/|scripts/|docker-compose\.yml$)'; then
+  echo "Post-merge: no generator-related changes detected."
+  exit 0
+fi
+
+"$ROOT_DIR/scripts/deploy_generator.sh" main

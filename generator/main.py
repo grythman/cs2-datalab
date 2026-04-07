@@ -56,6 +56,26 @@ async def render_tactics(req: RenderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/render-death-map")
+@app.post("/render-deathmap")
+@app.post("/render-death")
+async def render_death_map(req: RenderRequest):
+    try:
+        json_path = f"/data/parsed/{req.match_id}_{req.map_name}.json"
+        map_path = f"/data/scripts/maps/{req.map_name}.png"
+        output_path = f"/data/visuals/{req.match_id}_{req.map_name}_deathmap.png"
+        command = [
+            "python3",
+            "/data/scripts/vis_deathmap_cli.py",
+            json_path,
+            map_path,
+            output_path,
+        ]
+        return run_cli(command, {"status": "success", "file": output_path})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/render-first-kill")
 @app.post("/render-firstkill")
 @app.post("/render-first-kill-map")

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run cs2 generator sync every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Unit=cs2-generator-sync.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

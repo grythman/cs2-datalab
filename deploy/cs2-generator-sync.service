@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync cs2-datalab main and redeploy generator
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/linuxuser/cs2-datalab
+ExecStart=/home/linuxuser/cs2-datalab/scripts/sync_main_and_deploy.sh main
+
