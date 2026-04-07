@@ -385,11 +385,11 @@ def main():
     clips = []
     for i, scene in enumerate(scenes):
         frame = make_scene_frame(scene, chunks[min(i, len(chunks) - 1)], stats, match_id, map_name, i)
-        clip = ImageClip(frame).set_duration(max(4.8, durations[i]))
+        clip = ImageClip(frame).set_duration(durations[i])
         if i > 0:
-            clip = clip.fx(fadein, 0.18)
+            clip = clip.fx(fadein, 0.15)
         if i < len(scenes) - 1:
-            clip = clip.fx(fadeout, 0.18)
+            clip = clip.fx(fadeout, 0.15)
         clips.append(clip)
 
     video = concatenate_videoclips(clips, method="compose").set_audio(build_voice_mix(voice))
