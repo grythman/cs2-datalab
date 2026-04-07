@@ -169,13 +169,21 @@ def build_scenes(assets, stats):
 
 
 def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover"):
-    img = Image.new("RGB", (W, H), (8, 12, 18))
+    from PIL import ImageFilter
     if not path or not os.path.exists(path):
-        return img
+        return Image.new("RGB", (W, H), (8, 12, 18))
     src = Image.open(path).convert("RGB")
     aspect = src.width / max(src.height, 1)
     target = W / H
     if mode == "fit":
+        if aspect > target:
+            ch, cw = H, int(H * aspect)
+        else:
+            cw, ch = W, int(W / max(aspect, 0.01))
+        bg = src.resize((cw, ch), Image.LANCZOS)
+        bg = bg.crop(((cw - W) // 2, (ch - H) // 2, (cw + W) // 2, (ch + H) // 2))
+        img = Image.blend(bg.filter(ImageFilter.GaussianBlur(30)), Image.new("RGB", (W, H), (0, 0, 0)), 0.6)
+        
         if aspect > target:
             nw = W
             nh = int(nw / max(aspect, 0.01))
@@ -202,6 +210,7 @@ def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover"):
         max_y = max(0, nh - H)
         left = int(max_x * focus_x)
         top = int(max_y * focus_y)
+        img = Image.new("RGB", (W, H), (8, 12, 18))
         img.paste(src.crop((left, top, left + W, top + H)), (0, 0))
     return img
 
@@ -210,11 +219,11 @@ def add_overlay(img, strength=1.0):
     ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(ov)
     for i in range(H):
-        a = int(170 * strength * (i / H) ** 1.5)
+        a = int(140 * strength * (i / H) ** 2)
         draw.line([(0, i), (W, i)], fill=(6, 8, 14, a))
     for i in range(260):
-        a = int(220 * strength * (1 - i / 260) ** 1.8)
-        draw.line([(0, i), (W, i)], fill=(8, 10, 16, a))
+        a = int(180 * strength * (1 - i / 260) ** 2)
+        draw.line([(0, i), (W, i)], fill=(4, 6, 12, a))
     return Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
 
 
@@ -230,7 +239,7 @@ def draw_tokens(draw, x, y, text, font, max_width, default=(245, 247, 250), line
             cy += font.size + line_gap
             cx = x
         if key in PLAYER_COLORS:
-            rounded(draw, [cx - 4, cy - 4, cx + tw + 2, cy + font.size + 2], 10, (*fill, 44))
+            rounded(draw, [cx - 4, cy - 4, cx + tw + 2, cy + font.size + 2], 8, (*fill, 50), outline=fill, width=1)
         draw.text((cx, cy), token, font=font, fill=fill)
         cx += tw
     return cy
@@ -332,14 +341,12 @@ def allocate_durations(total, count):
 def build_voice_mix(voice):
     fps = 22050
     t = np.linspace(0, voice.duration, int(voice.duration * fps), endpoint=False)
-    bed = (0.018 * np.sin(2 * np.pi * 110 * t) + 0.008 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
     hit = np.zeros_like(t, dtype=np.float32)
     for point in np.linspace(0.6, max(0.8, voice.duration - 0.8), 6):
         m = (t >= point) & (t < point + 0.08)
-        hit[m] += 0.04 * np.sin(2 * np.pi * 700 * (t[m] - point)) * np.exp(-26 * (t[m] - point))
+        hit[m] += 0.015 * np.sin(2 * np.pi * 300 * (t[m] - point)) * np.exp(-30 * (t[m] - point))
     layers = [
         voice,
-        AudioArrayClip(np.column_stack([bed, bed]), fps=fps).set_duration(voice.duration),
         AudioArrayClip(np.column_stack([hit, hit]), fps=fps).set_duration(voice.duration),
     ]
     return CompositeAudioClip(layers)
