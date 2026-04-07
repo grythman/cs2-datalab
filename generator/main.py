@@ -14,6 +14,14 @@ class ShortsRequest(BaseModel):
     map_name: str
     script_text: str
 
+
+def run_cli(command, success_payload):
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode == 0:
+        return success_payload
+    detail = (result.stderr or result.stdout or "Command failed").strip()
+    raise HTTPException(status_code=500, detail=detail)
+
 @app.post("/render-heatmap")
 async def render_heatmap(req: RenderRequest):
     try:
@@ -21,10 +29,7 @@ async def render_heatmap(req: RenderRequest):
         map_path = f"/data/scripts/maps/{req.map_name}.png"
         output_path = f"/data/visuals/{req.match_id}_{req.map_name}_heatmap.png"
         command = ["python3", "/data/scripts/vis_heatmap_cli.py", json_path, map_path, output_path]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode == 0:
-            return {"status": "success", "file": output_path}
-        raise HTTPException(status_code=500, detail=result.stderr)
+        return run_cli(command, {"status": "success", "file": output_path})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -34,10 +39,7 @@ async def render_awp(req: RenderRequest):
         json_path = f"/data/parsed/{req.match_id}_{req.map_name}.json"
         output_path = f"/data/visuals/{req.match_id}_awp_positions.png"
         command = ["python3", "/data/scripts/visualize_awp_cli.py", json_path, output_path]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode == 0:
-            return {"status": "success", "file": output_path}
-        raise HTTPException(status_code=500, detail=result.stderr)
+        return run_cli(command, {"status": "success", "file": output_path})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -49,10 +51,27 @@ async def render_tactics(req: RenderRequest):
         output_path = f"/data/visuals/{req.match_id}_{req.map_name}_tactics.png"
         command = ["python3", "/data/scripts/vis_tactics_cli.py",
                    json_path, map_path, output_path]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode == 0:
-            return {"status": "success", "file": output_path}
-        raise HTTPException(status_code=500, detail=result.stderr)
+        return run_cli(command, {"status": "success", "file": output_path})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/render-first-kill")
+@app.post("/render-firstkill")
+@app.post("/render-first-kill-map")
+async def render_first_kill(req: RenderRequest):
+    try:
+        json_path = f"/data/parsed/{req.match_id}_{req.map_name}.json"
+        map_path = f"/data/scripts/maps/{req.map_name}.png"
+        output_path = f"/data/visuals/{req.match_id}_{req.map_name}_firstkill.png"
+        command = [
+            "python3",
+            "/data/scripts/vis_firstkill_cli.py",
+            json_path,
+            map_path,
+            output_path,
+        ]
+        return run_cli(command, {"status": "success", "file": output_path})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
