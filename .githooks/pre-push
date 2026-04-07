@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+REMOTE_NAME="${1:-origin}"
+REMOTE_URL="${2:-}"
+TARGET_BRANCH="main"
+LOG_DIR="$ROOT_DIR/.git-hooks/logs"
+
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/pre-push-$(date +%Y%m%d).log"
+
+readarray -t PUSH_LINES < <(cat)
+
+if [ "${#PUSH_LINES[@]}" -eq 0 ]; then
+  echo "pre-push: no refs received, skipping deploy."
+  exit 0
+fi
+
+declare -A SERVICES=()
+
+mark_service() {
+  local service="$1"
+  SERVICES["$service"]=1
+}
+
+add_services_for_file() {
+  local file="$1"
+  case "$file" in
+    generator/*)
+      mark_service generator
+      ;;
+    parser/*)
+      mark_service parser
+      ;;
+    analyzer/*)
+      mark_service analyzer
+      ;;
+    n8n/*)
+      mark_service n8n
+      ;;
+    nginx/*)
+      mark_service nginx
+      ;;
+    scripts/*)
+      mark_service parser
+      mark_service analyzer
+      mark_service generator
+      mark_service n8n
+      ;;
+    docker-compose.yml)
+      mark_service parser
+      mark_service analyzer
+      mark_service generator
+      mark_service n8n
+      mark_service postgres
+      mark_service nginx
+      ;;
+    .env)
+      mark_service parser
+      mark_service analyzer
+      mark_service generator
+      mark_service n8n
+      mark_service postgres
+      mark_service nginx
+      ;;
+  esac
+}
+
+for line in "${PUSH_LINES[@]}"; do
+  [ -n "$line" ] || continue
+  local_ref=""
+  local_sha=""
+  remote_ref=""
+  remote_sha=""
+  read -r local_ref local_sha remote_ref remote_sha <<< "$line"
+
+  remote_branch="${remote_ref#refs/heads/}"
+  if [ "$remote_branch" != "$TARGET_BRANCH" ]; then
+    continue
+  fi
+
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    diff_range="$local_sha"
+  else
+    diff_range="$remote_sha..$local_sha"
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    add_services_for_file "$file"
+  done < <(git diff --name-only "$diff_range")
+done
+
+if [ "${#SERVICES[@]}" -eq 0 ]; then
+  echo "pre-push: no docker services affected for branch '$TARGET_BRANCH'."
+  exit 0
+fi
+
+ORDER=(postgres parser analyzer generator n8n nginx)
+TO_DEPLOY=()
+for service in "${ORDER[@]}"; do
+  if [ -n "${SERVICES[$service]:-}" ]; then
+    TO_DEPLOY+=("$service")
+  fi
+done
+
+echo "pre-push: remote=$REMOTE_NAME url=$REMOTE_URL" | tee -a "$LOG_FILE"
+echo "pre-push: branch=$TARGET_BRANCH services=${TO_DEPLOY[*]}" | tee -a "$LOG_FILE"
+
+for service in "${TO_DEPLOY[@]}"; do
+  echo "[$(date '+%F %T')] deploying $service" | tee -a "$LOG_FILE"
+  docker compose up -d --build "$service" 2>&1 | tee -a "$LOG_FILE"
+done
+
+echo "pre-push: deploy complete." | tee -a "$LOG_FILE"
