@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir \
     matplotlib \
     pandas \
     numpy \
+    scipy \
     pillow \
     "moviepy<2.0.0" gTTS \
     moviepy \
