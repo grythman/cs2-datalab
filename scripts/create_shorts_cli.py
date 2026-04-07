@@ -8,6 +8,7 @@ import sys
 import edge_tts
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from moviepy.audio.AudioClip import AudioArrayClip, CompositeAudioClip
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
 from moviepy.video.fx.fadein import fadein
 from moviepy.video.fx.fadeout import fadeout
@@ -17,6 +18,18 @@ MONGOLZ = {"910", "Techno4K", "bLitz", "cobrazera", "mzinho"}
 MOUZ = {"Brollan", "Jimpphat", "Spinx", "torzsi", "xertioN"}
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+PLAYER_COLORS = {
+    "910": (255, 200, 0),
+    "Techno4K": (255, 200, 0),
+    "bLitz": (255, 200, 0),
+    "cobrazera": (255, 200, 0),
+    "mzinho": (255, 200, 0),
+    "Brollan": (255, 92, 92),
+    "Jimpphat": (255, 92, 92),
+    "Spinx": (255, 92, 92),
+    "torzsi": (255, 92, 92),
+    "xertioN": (255, 92, 92),
+}
 
 
 async def generate_voiceover(text, output_path):
@@ -53,6 +66,11 @@ def wrap_text(text, font, max_width):
     return lines
 
 
+def text_width(font, text):
+    bbox = font.getbbox(text)
+    return bbox[2] - bbox[0]
+
+
 def clean_script_lines(script_text):
     text = re.sub(r"\s+", " ", script_text.strip())[:320]
     parts = re.split(r"(?<=[.!?])\s+", text)
@@ -80,11 +98,11 @@ def chunk_lines(lines, target_chunks):
 
 def limit_script_for_shorts(script_text):
     text = re.sub(r"\s+", " ", script_text.strip())
-    if len(text) <= 320:
+    if len(text) <= 520:
         return text
-    truncated = text[:320]
+    truncated = text[:520]
     last_stop = max(truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?"))
-    if last_stop > 120:
+    if last_stop > 180:
         return truncated[: last_stop + 1]
     return truncated.rstrip() + "..."
 
@@ -156,6 +174,26 @@ def build_match_stats(jdata):
     }
 
 
+def collect_highlights(jdata, stats):
+    kills = [k for k in get_kills(jdata) if isinstance(k, dict)]
+    top_fragger = "Unknown"
+    top_kills = 0
+    scoreboard = {}
+    for kill in kills:
+        attacker = kill.get("attacker_name", "")
+        if not attacker:
+            continue
+        scoreboard[attacker] = scoreboard.get(attacker, 0) + 1
+        if scoreboard[attacker] > top_kills:
+            top_fragger = attacker
+            top_kills = scoreboard[attacker]
+    return {
+        "first_kill": stats["first_kill"],
+        "top_fragger": top_fragger,
+        "top_kills": top_kills,
+    }
+
+
 def find_visuals(json_path, match_id, map_name, heatmap_img, awp_img):
     visuals_dir = os.path.dirname(heatmap_img) or "/data/visuals"
     candidates = {
@@ -198,6 +236,22 @@ def scene_catalog(available, stats):
         if key in available:
             scenes.append({"key": key, "title": title, "subtitle": subtitle, "image": available[key]})
     return scenes[:7] if len(scenes) > 7 else scenes
+
+
+def scene_transition_label(scene_key):
+    labels = {
+        "hook": "HOOK",
+        "heatmap": "HOT ZONE",
+        "firstkill": "ENTRY",
+        "deathmap": "TRADE MAP",
+        "tactics": "ROTATION",
+        "economy": "ECON",
+        "utility": "UTILITY",
+        "awp": "AWP LINE",
+        "round": "KEY ROUND",
+        "clutch": "CLUTCH",
+    }
+    return labels.get(scene_key, "CUT")
 
 
 def background_frame(path, zoom, drift_x, drift_y):
@@ -245,68 +299,138 @@ def draw_overlay(image, progress):
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 
+def draw_transition_overlay(draw, scene_key, progress):
+    pulse = int(130 + 60 * np.sin(progress * np.pi))
+    color = (255, 188, 0) if scene_key in {"hook", "heatmap", "economy"} else (80, 210, 255)
+    draw.rectangle([(0, 0), (W, 10)], fill=(*color, min(255, pulse)))
+    label = scene_transition_label(scene_key)
+    font = load_font(FONT_BOLD, 16)
+    x2 = W - 20
+    x1 = x2 - 126
+    y1 = 82
+    y2 = y1 + 34
+    draw_rounded_rect(draw, [x1, y1, x2, y2], 14, (14, 18, 28), outline=color, width=2)
+    draw.text(((x1 + x2) / 2, y1 + 7), label, font=font, fill=color, anchor="ma")
+
+
 def draw_header(draw, map_name, scene_title, section_index, total_sections):
-    font_logo = load_font(FONT_BOLD, 28)
-    font_tag = load_font(FONT_BOLD, 24)
-    draw.rectangle([(0, 0), (W, 86)], fill=(8, 10, 16))
-    draw.text((40, 24), "CS2 DATA LAB", font=font_logo, fill=(255, 196, 0))
-    draw.text((W - 40, 24), map_name.upper(), font=font_tag, fill=(170, 176, 190), anchor="ra")
-    draw.text((40, 106), scene_title, font=load_font(FONT_BOLD, 72), fill=(245, 247, 250))
+    font_logo = load_font(FONT_BOLD, 20)
+    font_tag = load_font(FONT_BOLD, 16)
+    draw.rectangle([(0, 0), (W, 64)], fill=(8, 10, 16))
+    draw.text((24, 18), "CS2 DATA LAB", font=font_logo, fill=(255, 196, 0))
+    draw.text((W - 24, 20), map_name.upper(), font=font_tag, fill=(170, 176, 190), anchor="ra")
+    draw.text((24, 92), scene_title, font=load_font(FONT_BOLD, 38), fill=(245, 247, 250))
     draw.text(
-        (40, 188),
+        (24, 136),
         f"{section_index}/{total_sections} ANALYSIS CUT",
-        font=load_font(FONT_BOLD, 24),
+        font=load_font(FONT_BOLD, 16),
         fill=(255, 196, 0),
     )
 
 
 def draw_stats(draw, stats, progress):
-    font_small = load_font(FONT_REGULAR, 28)
-    font_stat = load_font(FONT_BOLD, 42)
-    y = 250
-    draw_rounded_rect(draw, [40, y, 1040, y + 146], 28, (12, 14, 24, 210), outline=(40, 46, 60), width=2)
+    font_small = load_font(FONT_REGULAR, 16)
+    font_stat = load_font(FONT_BOLD, 24)
+    x1 = 24
+    x2 = W - 24
+    y = 170
+    draw_rounded_rect(draw, [x1, y, x2, y + 88], 20, (12, 14, 24, 210), outline=(40, 46, 60), width=2)
     metrics = [
         ("MONGOLZ", stats["mongolz_kills"], (255, 200, 0)),
         ("MOUZ", stats["mouz_kills"], (255, 92, 92)),
         ("ROUNDS", stats["total_rounds"], (112, 214, 255)),
     ]
-    x_positions = [170, 540, 900]
+    width = x2 - x1
+    x_positions = [x1 + width * 0.17, x1 + width * 0.5, x1 + width * 0.83]
     for (label, value, color), x in zip(metrics, x_positions):
-        draw.text((x, y + 28), label, font=font_small, fill=color, anchor="mm")
-        draw.text((x, y + 86), str(value), font=font_stat, fill=(245, 247, 250), anchor="mm")
+        draw.text((x, y + 20), label, font=font_small, fill=color, anchor="mm")
+        draw.text((x, y + 56), str(value), font=font_stat, fill=(245, 247, 250), anchor="mm")
 
-    bar_y = y + 130
-    draw.rectangle([(60, bar_y), (1020, bar_y + 6)], fill=(34, 38, 52))
-    draw.rectangle([(60, bar_y), (60 + int(960 * progress), bar_y + 6)], fill=(255, 196, 0))
+    bar_y = y + 78
+    draw.rectangle([(x1 + 16, bar_y), (x2 - 16, bar_y + 4)], fill=(34, 38, 52))
+    draw.rectangle([(x1 + 16, bar_y), (x1 + 16 + int((x2 - x1 - 32) * progress), bar_y + 4)], fill=(255, 196, 0))
 
 
 def draw_scene_subtitle(draw, subtitle, body_text, progress):
-    title_font = load_font(FONT_BOLD, 38)
-    body_font = load_font(FONT_BOLD, 54)
-    label_font = load_font(FONT_REGULAR, 26)
+    title_font = load_font(FONT_BOLD, 18)
+    body_font = load_font(FONT_BOLD, 24)
+    label_font = load_font(FONT_REGULAR, 14)
 
-    box_y = 1260
-    draw_rounded_rect(draw, [36, box_y, 1044, 1760], 34, (12, 16, 24, 214), outline=(50, 56, 70), width=2)
-    draw.text((68, box_y + 36), subtitle.upper(), font=label_font, fill=(255, 196, 0))
+    x1 = 24
+    x2 = W - 24
+    box_y = H - 250
+    box_h = 180
+    draw_rounded_rect(draw, [x1, box_y, x2, box_y + box_h], 22, (12, 16, 24, 214), outline=(50, 56, 70), width=2)
+    draw.text((x1 + 18, box_y + 16), subtitle.upper(), font=label_font, fill=(255, 196, 0))
 
-    lines = wrap_text(body_text, body_font, 900)
+    lines = wrap_text(body_text, body_font, x2 - x1 - 36)
     lines = lines[:3]
-    y = box_y + 92
-    for line in lines:
-        draw.text((68, y), line, font=body_font, fill=(245, 247, 250))
-        y += 72
+    y = box_y + 42
+    active_idx = min(len(lines) - 1, int(progress * max(1, len(lines)))) if lines else 0
+    for idx, line in enumerate(lines):
+        fill = (255, 216, 120) if idx == active_idx else (245, 247, 250)
+        if idx == active_idx:
+            draw_rounded_rect(draw, [x1 + 10, y - 5, x2 - 10, y + 32], 12, (255, 188, 0, 28))
+        draw.text((x1 + 18, y), line, font=body_font, fill=fill)
+        y += 34
 
-    glow_width = int(900 * progress)
-    draw.rectangle([(68, 1710), (68 + glow_width, 1720)], fill=(255, 196, 0))
-    draw.text((68, 1660), "DATA-DRIVEN SHORTS", font=title_font, fill=(150, 156, 170))
+    glow_width = int((x2 - x1 - 36) * progress)
+    draw.rectangle([(x1 + 18, box_y + box_h - 18), (x1 + 18 + glow_width, box_y + box_h - 12)], fill=(255, 196, 0))
+    draw.text((x1 + 18, box_y + box_h - 38), "DATA-DRIVEN SHORTS", font=title_font, fill=(150, 156, 170))
+
+
+def draw_highlighted_text(draw, x, y, text, font, default_fill, max_width):
+    tokens = text.split()
+    cx = x
+    for token in tokens:
+        raw = token.strip()
+        key = raw.strip(".,!?():;[]{}\"'")
+        fill = PLAYER_COLORS.get(key, default_fill)
+        token_text = f"{raw} "
+        token_w = text_width(font, token_text)
+        if cx + token_w > x + max_width:
+            y += 48
+            cx = x
+        if key in PLAYER_COLORS:
+            draw_rounded_rect(draw, [cx - 6, y - 6, cx + token_w, y + 38], 12, (*fill, 45))
+        draw.text((cx, y), token_text, font=font, fill=fill)
+        cx += token_w
+    return y
+
+
+def draw_player_highlights(draw, highlights, progress):
+    font_title = load_font(FONT_BOLD, 14)
+    font_body = load_font(FONT_BOLD, 16)
+    x1, y1, x2, y2 = 24, 300, int(W * 0.52), 386
+    draw_rounded_rect(draw, [x1, y1, x2, y2], 24, (12, 16, 24, 216), outline=(48, 56, 70), width=2)
+    draw.text((x1 + 24, y1 + 18), "PLAYER FOCUS", font=font_title, fill=(112, 214, 255))
+    pulse = 8 * np.sin(progress * np.pi * 2)
+    line_y = draw_highlighted_text(
+        draw,
+        x1 + 24,
+        int(y1 + 54 + pulse),
+        f"Entry: {highlights['first_kill']}",
+        font_body,
+        (245, 247, 250),
+        x2 - x1 - 24,
+    )
+    draw_highlighted_text(
+        draw,
+        x1 + 24,
+        line_y + 18,
+        f"Top frag: {highlights['top_fragger']} ({highlights['top_kills']})",
+        font_body,
+        (245, 247, 250),
+        x2 - x1 - 24,
+    )
 
 
 def draw_footer(draw):
-    footer_font = load_font(FONT_BOLD, 26)
-    draw.text((W // 2, 1860), "LIKE • COMMENT • SUBSCRIBE", font=footer_font, fill=(255, 196, 0), anchor="mm")
+    footer_font = load_font(FONT_BOLD, 14)
+    draw.text((W // 2, H - 18), "LIKE • COMMENT • SUBSCRIBE", font=footer_font, fill=(255, 196, 0), anchor="mm")
 
 
-def make_scene_frame(scene, script_chunk, stats, match_id, map_name, scene_index, total_scenes, progress):
+def make_scene_frame(scene, script_chunk, stats, highlights, match_id, map_name, scene_index, total_scenes, progress):
     zoom = 1.08 + 0.06 * progress
     drift_x = min(1.0, 0.18 + 0.10 * scene_index + progress * 0.18)
     drift_y = min(1.0, 0.10 + (scene_index % 3) * 0.14 + progress * 0.08)
@@ -315,34 +439,39 @@ def make_scene_frame(scene, script_chunk, stats, match_id, map_name, scene_index
     draw = ImageDraw.Draw(frame)
 
     draw_header(draw, map_name, scene["title"], scene_index + 1, total_scenes)
+    draw_transition_overlay(draw, scene["key"], progress)
     draw_stats(draw, stats, progress)
 
-    badge_font = load_font(FONT_BOLD, 26)
-    draw_rounded_rect(draw, [40, 430, 530, 500], 22, (20, 24, 32, 225), outline=(48, 56, 72), width=2)
-    draw.text((70, 452), match_id.replace("_", " ").upper(), font=badge_font, fill=(220, 224, 232))
-    draw.text((70, 482), scene["subtitle"], font=load_font(FONT_REGULAR, 24), fill=(150, 156, 170))
+    badge_font = load_font(FONT_BOLD, 16)
+    draw_rounded_rect(draw, [24, 270, W - 180, 316], 16, (20, 24, 32, 225), outline=(48, 56, 72), width=2)
+    draw.text((40, 286), match_id.replace("_", " ").upper(), font=badge_font, fill=(220, 224, 232))
+    draw.text((40, 304), scene["subtitle"], font=load_font(FONT_REGULAR, 13), fill=(150, 156, 170))
 
-    panel_y = 560
-    draw_rounded_rect(draw, [40, panel_y, 1040, 1180], 30, (255, 255, 255, 20))
-    mini = background_frame(scene["image"], 1.02 + progress * 0.08, 0.35, 0.25).resize((960, 560), Image.LANCZOS)
-    frame.paste(mini, (60, panel_y + 20))
+    panel_y = 410
+    panel_x1 = 24
+    panel_x2 = W - 24
+    panel_h = 380
+    draw_rounded_rect(draw, [panel_x1, panel_y, panel_x2, panel_y + panel_h], 20, (255, 255, 255, 18))
+    mini = background_frame(scene["image"], 1.02 + progress * 0.08, 0.35, 0.25).resize((panel_x2 - panel_x1 - 24, panel_h - 24), Image.LANCZOS)
+    frame.paste(mini, (panel_x1 + 12, panel_y + 12))
     frame = draw_overlay(frame, progress * 0.4)
     draw = ImageDraw.Draw(frame)
-    draw.rectangle([(60, panel_y + 20), (1020, panel_y + 580)], outline=(255, 196, 0), width=3)
+    draw.rectangle([(panel_x1 + 12, panel_y + 12), (panel_x2 - 12, panel_y + panel_h - 12)], outline=(255, 196, 0), width=2)
 
-    pulse_radius = 40 + int(28 * abs(np.sin(progress * np.pi * 3)))
-    pulse_x = 940 - (scene_index % 2) * 110
-    pulse_y = 650 + (scene_index % 3) * 120
+    pulse_radius = 22 + int(10 * abs(np.sin(progress * np.pi * 3)))
+    pulse_x = int(W * 0.78) - (scene_index % 2) * 44
+    pulse_y = int(H * 0.46) + (scene_index % 3) * 52
     draw.ellipse(
         [(pulse_x - pulse_radius, pulse_y - pulse_radius), (pulse_x + pulse_radius, pulse_y + pulse_radius)],
         outline=(255, 196, 0),
-        width=5,
+        width=3,
     )
     draw.ellipse(
-        [(pulse_x - 12, pulse_y - 12), (pulse_x + 12, pulse_y + 12)],
+        [(pulse_x - 8, pulse_y - 8), (pulse_x + 8, pulse_y + 8)],
         fill=(255, 196, 0),
     )
 
+    draw_player_highlights(draw, highlights, progress)
     draw_scene_subtitle(draw, scene["subtitle"], script_chunk, progress)
     draw_footer(draw)
     return np.array(frame)
@@ -361,7 +490,7 @@ def allocate_durations(audio_duration, scene_count):
     return [duration * scale for duration in durations]
 
 
-def build_scene_clips(scenes, script_chunks, stats, match_id, map_name, audio_duration):
+def build_scene_clips(scenes, script_chunks, stats, highlights, match_id, map_name, audio_duration):
     durations = allocate_durations(audio_duration, len(scenes))
     clips = []
     for index, scene in enumerate(scenes):
@@ -371,6 +500,7 @@ def build_scene_clips(scenes, script_chunks, stats, match_id, map_name, audio_du
             scene,
             script_chunk,
             stats,
+            highlights,
             match_id,
             map_name,
             index,
@@ -384,6 +514,28 @@ def build_scene_clips(scenes, script_chunks, stats, match_id, map_name, audio_du
             clip = clip.fx(fadeout, 0.25)
         clips.append(clip)
     return clips
+
+
+def build_audio_layers(voice_clip):
+    layers = [voice_clip]
+    duration = voice_clip.duration
+    fps = 22050
+    t = np.linspace(0, duration, int(duration * fps), endpoint=False)
+
+    bed = 0.02 * np.sin(2 * np.pi * 110 * t) + 0.01 * np.sin(2 * np.pi * 220 * t)
+    envelope = np.linspace(0.35, 0.9, len(t))
+    bed = (bed * envelope).astype(np.float32)
+    bed_stereo = np.column_stack([bed, bed])
+    layers.append(AudioArrayClip(bed_stereo, fps=fps).set_duration(duration))
+
+    hit = np.zeros_like(t, dtype=np.float32)
+    hit_points = np.linspace(0.4, max(0.5, duration - 0.6), 5)
+    for point in hit_points:
+        mask = (t >= point) & (t < point + 0.09)
+        hit[mask] += 0.045 * np.sin(2 * np.pi * 880 * (t[mask] - point)) * np.exp(-28 * (t[mask] - point))
+    hit_stereo = np.column_stack([hit, hit])
+    layers.append(AudioArrayClip(hit_stereo, fps=fps).set_duration(duration))
+    return CompositeAudioClip(layers)
 
 
 def main():
@@ -405,6 +557,7 @@ def main():
     match_id = jdata.get("match_id", "match")
     map_name = jdata.get("map", "de_mirage")
     stats = build_match_stats(jdata)
+    highlights = collect_highlights(jdata, stats)
     visuals = find_visuals(json_path, match_id, map_name, heatmap_img, awp_img)
     scenes = scene_catalog(visuals, stats)
     if not scenes:
@@ -418,15 +571,15 @@ def main():
     asyncio.run(generate_voiceover(script_text, temp_audio))
 
     audio = AudioFileClip(temp_audio)
-    max_duration = 28
+    max_duration = 40
     if audio.duration > max_duration:
         audio = audio.subclip(0, max_duration)
     print(f"Audio duration: {audio.duration:.1f}s")
 
     script_chunks = chunk_lines(clean_script_lines(script_text), len(scenes))
-    clips = build_scene_clips(scenes, script_chunks, stats, match_id, map_name, audio.duration)
-
-    video = concatenate_videoclips(clips, method="compose").set_audio(audio)
+    clips = build_scene_clips(scenes, script_chunks, stats, highlights, match_id, map_name, audio.duration)
+    final_audio = build_audio_layers(audio)
+    video = concatenate_videoclips(clips, method="compose").set_audio(final_audio)
 
     os.makedirs(os.path.dirname(output_video), exist_ok=True)
     print("Rendering upgraded shorts...")
