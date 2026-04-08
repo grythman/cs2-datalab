@@ -168,7 +168,7 @@ def build_scenes(assets, stats):
     return scenes[:10] if len(scenes) > 10 else scenes
 
 
-def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover"):
+def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover", blur_radius=30):
     from PIL import ImageFilter
     if not path or not os.path.exists(path):
         return Image.new("RGB", (W, H), (8, 12, 18))
@@ -182,7 +182,7 @@ def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover"):
             cw, ch = W, int(W / max(aspect, 0.01))
         bg = src.resize((cw, ch), Image.LANCZOS)
         bg = bg.crop(((cw - W) // 2, (ch - H) // 2, (cw + W) // 2, (ch + H) // 2))
-        img = Image.blend(bg.filter(ImageFilter.GaussianBlur(30)), Image.new("RGB", (W, H), (0, 0, 0)), 0.6)
+        img = Image.blend(bg.filter(ImageFilter.GaussianBlur(blur_radius)), Image.new("RGB", (W, H), (0, 0, 0)), 0.6)
         
         if aspect > target:
             nw = W
@@ -219,19 +219,20 @@ def add_overlay(img, strength=1.0):
     ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(ov)
     for i in range(H):
-        a = int(140 * strength * (i / H) ** 2)
-        draw.line([(0, i), (W, i)], fill=(6, 8, 14, a))
-    for i in range(260):
-        a = int(180 * strength * (1 - i / 260) ** 2)
-        draw.line([(0, i), (W, i)], fill=(4, 6, 12, a))
+        a = int(150 * strength * (i / H) ** 2.2)
+        draw.line([(0, i), (W, i)], fill=(5, 7, 15, a))
+    for i in range(280):
+        a = int(200 * strength * (1 - i / 280) ** 2.2)
+        draw.line([(0, i), (W, i)], fill=(3, 5, 13, a))
     return Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
 
 
 def draw_tokens(draw, x, y, text, font, max_width, default=(245, 247, 250), line_gap=12):
     cx = x
     cy = y
+    shadow_offset = 2
     for raw in text.split():
-        key = raw.strip(".,!?():;[]{}\"'")
+        key = raw.strip(".,!?():;[]{}\"\'")
         fill = PLAYER_COLORS.get(key, default)
         token = raw + " "
         tw = font.getbbox(token)[2]
@@ -240,6 +241,7 @@ def draw_tokens(draw, x, y, text, font, max_width, default=(245, 247, 250), line
             cx = x
         if key in PLAYER_COLORS:
             rounded(draw, [cx - 4, cy - 4, cx + tw + 2, cy + font.size + 2], 8, (*fill, 50), outline=fill, width=1)
+        draw.text((cx + shadow_offset, cy + shadow_offset), token, font=font, fill=(0, 0, 0, 100))
         draw.text((cx, cy), token, font=font, fill=fill)
         cx += tw
     return cy
@@ -264,7 +266,8 @@ def draw_hook(draw, scene, stats, match_id, map_name):
 def draw_fullscreen_scene(draw, scene, script_chunk, accent, top_label):
     mini = load_font(FONT_BOLD, 14)
     title = load_font(FONT_BOLD, 34)
-    body = load_font(FONT_BOLD, 26)
+    body_size = get_dynamic_font_size(len(script_chunk), 26)
+    body = load_font(FONT_BOLD, body_size)
     draw.text((28, 28), top_label, font=mini, fill=accent)
     draw.text((28, 58), scene["title"], font=title, fill=(250, 252, 255))
     rounded(draw, [20, 18, W - 20, 106], 20, (0, 0, 0, 0), outline=accent, width=2)
@@ -281,7 +284,8 @@ def draw_fullscreen_scene(draw, scene, script_chunk, accent, top_label):
 def draw_split_scene(draw, scene, script_chunk, stats, accent):
     mini = load_font(FONT_BOLD, 14)
     title = load_font(FONT_BOLD, 28)
-    body = load_font(FONT_BOLD, 24)
+    body_size = get_dynamic_font_size(len(script_chunk), 24)
+    body = load_font(FONT_BOLD, body_size)
     rounded(draw, [28, 28, W - 28, 92], 18, (10, 14, 22, 210))
     draw.text((46, 48), scene["title"], font=title, fill=(250, 252, 255))
     draw.text((46, 76), scene["subtitle"], font=mini, fill=accent)
@@ -301,11 +305,14 @@ def make_scene_frame(scene, script_chunk, stats, match_id, map_name, idx):
     focus_x = [0.15, 0.45, 0.3, 0.58, 0.22, 0.48][idx % 6]
     focus_y = [0.12, 0.25, 0.4, 0.18, 0.35, 0.22][idx % 6]
     fit_scenes = {"heatmap", "firstkill", "deathmap", "economy", "utility", "awp", "round", "clutch"}
+    preset = SCENE_PRESETS.get(scene["key"], {"blur": 30, "overlay_strength": 0.7})
+    blur_val = preset.get("blur", 30)
+    overlay_str = preset.get("overlay_strength", 0.7)
     if scene["key"] in fit_scenes:
-        bg = bg_image(scene["image"], zoom=0.96, mode="fit")
+        bg = bg_image(scene["image"], zoom=0.96, mode="fit", blur_radius=blur_val)
     else:
-        bg = bg_image(scene["image"], zoom=1.06, focus_x=focus_x, focus_y=focus_y, mode="cover")
-    img = add_overlay(bg, 1.0)
+        bg = bg_image(scene["image"], zoom=1.06, focus_x=focus_x, focus_y=focus_y, mode="cover", blur_radius=blur_val)
+    img = add_overlay(bg, overlay_str)
     draw = ImageDraw.Draw(img)
     accents = {
         "heatmap": (255, 190, 0),
@@ -332,10 +339,31 @@ def make_scene_frame(scene, script_chunk, stats, match_id, map_name, idx):
 
 def allocate_durations(total, count):
     base = total / max(count, 1)
-    weights = [1.2] + [1.0] * max(0, count - 2) + ([0.9] if count > 1 else [])
+    weights = [1.3] + [1.0] * max(0, count - 2) + ([0.85] if count > 1 else [])
     weights = weights[:count]
     s = sum(weights) or 1
     return [total * w / s for w in weights]
+
+
+def get_dynamic_font_size(text_length, base_size):
+    if text_length < 50:
+        return base_size + 3
+    elif text_length > 150:
+        return base_size - 2
+    return base_size
+
+
+SCENE_PRESETS = {
+    "hook": {"blur": 20, "overlay_strength": 0.8, "min_duration": 5.5},
+    "heatmap": {"blur": 30, "overlay_strength": 0.7, "min_duration": 7},
+    "firstkill": {"blur": 25, "overlay_strength": 0.75, "min_duration": 6},
+    "deathmap": {"blur": 35, "overlay_strength": 0.7, "min_duration": 7},
+    "economy": {"blur": 25, "overlay_strength": 0.75, "min_duration": 6},
+    "utility": {"blur": 28, "overlay_strength": 0.75, "min_duration": 6},
+    "awp": {"blur": 32, "overlay_strength": 0.7, "min_duration": 7},
+    "round": {"blur": 30, "overlay_strength": 0.75, "min_duration": 7},
+    "clutch": {"blur": 35, "overlay_strength": 0.8, "min_duration": 8},
+}
 
 
 def build_voice_mix(voice):
@@ -385,11 +413,15 @@ def main():
     clips = []
     for i, scene in enumerate(scenes):
         frame = make_scene_frame(scene, chunks[min(i, len(chunks) - 1)], stats, match_id, map_name, i)
-        clip = ImageClip(frame).set_duration(durations[i])
+        preset = SCENE_PRESETS.get(scene["key"], {})
+        min_dur = preset.get("min_duration", 5)
+        duration = max(durations[i], min_dur)
+        clip = ImageClip(frame).set_duration(duration)
+        fade_duration = 0.2 if voice.duration > 55 else 0.25
         if i > 0:
-            clip = clip.fx(fadein, 0.15)
+            clip = clip.fx(fadein, fade_duration)
         if i < len(scenes) - 1:
-            clip = clip.fx(fadeout, 0.15)
+            clip = clip.fx(fadeout, fade_duration)
         clips.append(clip)
 
     video = concatenate_videoclips(clips, method="compose").set_audio(build_voice_mix(voice))
