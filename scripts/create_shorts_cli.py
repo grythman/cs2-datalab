@@ -56,7 +56,7 @@ def wrap_text(text, font, max_width):
 
 def clean_script(text):
     text = re.sub(r"\s+", " ", text.strip())
-    text = text[:650]
+    text = text[:1500]
     parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
     if not parts:
         return ["CS2 тоглолтын гол мөчүүдийг харцгаая."]
@@ -65,9 +65,9 @@ def clean_script(text):
 
 def clip_script(text):
     text = re.sub(r"\s+", " ", text.strip())
-    if len(text) <= 650:
+    if len(text) <= 1500:
         return text
-    cut = text[:650]
+    cut = text[:1500]
     last = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
     return cut[: last + 1] if last > 180 else cut + "..."
 
@@ -165,7 +165,7 @@ def build_scenes(assets, stats):
         ("clutch", "CLUTCH", f"{stats['top_fragger']} даралттай мөчийг хаасан."),
     ]
     scenes = [{"key": k, "title": t, "subtitle": s, "image": assets[k]} for k, t, s in base if k in assets]
-    return scenes[:6] if len(scenes) > 6 else scenes
+    return scenes[:10] if len(scenes) > 10 else scenes
 
 
 def bg_image(path, zoom=1.0, focus_x=0.5, focus_y=0.5, mode="cover"):
@@ -371,12 +371,12 @@ def main():
 
     asyncio.run(generate_voiceover(script_text, temp_audio))
     voice = AudioFileClip(temp_audio)
-    if voice.duration > 42:
-        voice = voice.subclip(0, 42)
-    if voice.duration < 35:
-        target = 35
+    if voice.duration > 59:
+        voice = voice.subclip(0, 59)
+    if voice.duration < 50:
+        target = 50
     else:
-        target = min(42, voice.duration)
+        target = min(59, voice.duration)
     if voice.duration > target:
         voice = voice.subclip(0, target)
 
