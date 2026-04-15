@@ -455,19 +455,24 @@ def allocate_durations(chunks: list[str], total_duration: float, min_duration: f
     return [min_duration + remaining * (weight / weight_sum) for weight in weights]
 
 
-def build_audio_mix(voice_clip, scene_starts: list[float]) -> CompositeAudioClip:
+def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]) -> CompositeAudioClip:
     duration = voice_clip.duration
     fps = 44100
     t = np.linspace(0, duration, max(1, int(duration * fps)), endpoint=False)
 
-    # Soft ambient bed: low sine layers with slow pulsing envelope.
-    pulse = 0.72 + 0.18 * np.sin(2 * np.pi * 0.12 * t)
+    # Ambient bed with mild ducking envelope to leave room for narration.
+    pulse = 0.65 + 0.16 * np.sin(2 * np.pi * 0.09 * t)
     bed = (
-        0.0065 * np.sin(2 * np.pi * 92 * t)
-        + 0.0040 * np.sin(2 * np.pi * 184 * t)
-        + 0.0025 * np.sin(2 * np.pi * 276 * t)
+        0.0048 * np.sin(2 * np.pi * 92 * t)
+        + 0.0032 * np.sin(2 * np.pi * 184 * t)
+        + 0.0018 * np.sin(2 * np.pi * 276 * t)
     ).astype(np.float32)
-    bed *= pulse.astype(np.float32)
+    duck = np.ones_like(t, dtype=np.float32) * 0.72
+    for start in scene_starts:
+        mask = (t >= start) & (t < start + 1.1)
+        local = t[mask] - start
+        duck[mask] -= 0.12 * np.exp(-2.8 * local)
+    bed *= (pulse * duck).astype(np.float32)
 
     # Airy transition sweep for scene changes.
     swoosh = np.zeros_like(t, dtype=np.float32)
@@ -475,14 +480,29 @@ def build_audio_mix(voice_clip, scene_starts: list[float]) -> CompositeAudioClip
         mask = (t >= start - 0.03) & (t < start + 0.22)
         local = t[mask] - start
         sweep = np.sin(2 * np.pi * (160 + 780 * np.maximum(local, 0)) * local)
-        swoosh[mask] += 0.010 * sweep * np.exp(-8 * np.abs(local))
+        swoosh[mask] += 0.008 * sweep * np.exp(-8 * np.abs(local))
 
-    # Soft impact accent shortly after each scene starts.
+    # Scene-specific accents.
     hit = np.zeros_like(t, dtype=np.float32)
-    for start in scene_starts:
-        mask = (t >= start + 0.08) & (t < start + 0.18)
-        local = t[mask] - (start + 0.08)
-        hit[mask] += 0.009 * np.sin(2 * np.pi * 260 * local) * np.exp(-20 * local)
+    for idx, start in enumerate(scene_starts):
+        key = scene_keys[idx] if idx < len(scene_keys) else "default"
+        if key == "clutch":
+            mask = (t >= start + 0.04) & (t < start + 0.24)
+            local = t[mask] - (start + 0.04)
+            hit[mask] += 0.010 * np.sin(2 * np.pi * 180 * local) * np.exp(-10 * local)
+            hit[mask] += 0.008 * np.sin(2 * np.pi * 420 * local) * np.exp(-16 * local)
+        elif key in {"heatmap", "deathmap"}:
+            mask = (t >= start + 0.08) & (t < start + 0.20)
+            local = t[mask] - (start + 0.08)
+            hit[mask] += 0.006 * np.sin(2 * np.pi * 230 * local) * np.exp(-18 * local)
+        elif key in {"economy", "utility", "awp"}:
+            mask = (t >= start + 0.10) & (t < start + 0.18)
+            local = t[mask] - (start + 0.10)
+            hit[mask] += 0.004 * np.sin(2 * np.pi * 320 * local) * np.exp(-20 * local)
+        else:
+            mask = (t >= start + 0.10) & (t < start + 0.18)
+            local = t[mask] - (start + 0.10)
+            hit[mask] += 0.0035 * np.sin(2 * np.pi * 250 * local) * np.exp(-22 * local)
 
     voice_base = voice_clip.set_fps(fps) if hasattr(voice_clip, "set_fps") else voice_clip
     layers = [voice_base]
@@ -492,12 +512,12 @@ def build_audio_mix(voice_clip, scene_starts: list[float]) -> CompositeAudioClip
     return CompositeAudioClip(layers)
 
 
-def attach_audio(video, voice_clip, scene_starts: list[float]):
+def attach_audio(video, voice_clip, scene_starts: list[float], scene_keys: list[str]):
     try:
         has_real_voice = isinstance(voice_clip, AudioFileClip)
         if has_real_voice:
-            mixed_audio = build_audio_mix(voice_clip, scene_starts)
-            print("Audio attach mode: voice + ambient mix")
+            mixed_audio = build_audio_mix(voice_clip, scene_starts, scene_keys)
+            print("Audio attach mode: voice + dynamic ambient mix")
             return video.set_audio(mixed_audio)
         voice_primary = voice_clip.set_fps(44100) if hasattr(voice_clip, "set_fps") else voice_clip
         print("Audio attach mode: silent fallback clip")
@@ -589,8 +609,9 @@ def main():
         clips.append(clip)
         current += duration
 
+    scene_keys = [scene.key for scene in scenes[: len(scene_starts)]]
     video = concatenate_videoclips(clips, method="compose")
-    video = attach_audio(video, voice, scene_starts)
+    video = attach_audio(video, voice, scene_starts, scene_keys)
 
     os.makedirs(os.path.dirname(output_video), exist_ok=True)
     try:
