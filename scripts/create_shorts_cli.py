@@ -11,7 +11,7 @@ import edge_tts
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from moviepy.audio.AudioClip import AudioArrayClip, CompositeAudioClip
-from moviepy.editor import AudioFileClip, CompositeVideoClip, ImageClip, concatenate_videoclips
+from moviepy.editor import AudioFileClip, CompositeVideoClip, ImageClip, concatenate_audioclips, concatenate_videoclips
 from moviepy.video.fx.fadein import fadein
 from moviepy.video.fx.fadeout import fadeout
 
@@ -23,6 +23,7 @@ FPS = 20
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 VOICE_PATH = "/data/videos/temp_voice.mp3"
+AUDIO_ASSET_DIR = "/data/scripts/audio"
 MONGOLZ = {"910", "Techno4K", "bLitz", "cobrazera", "mzinho"}
 MOUZ = {"Brollan", "Jimpphat", "Spinx", "torzsi", "xertioN"}
 PLAYER_COLORS = {name: (255, 205, 0) for name in MONGOLZ} | {name: (255, 92, 92) for name in MOUZ}
@@ -196,6 +197,24 @@ def make_silent_audio(duration: float, fps: int = 44100) -> AudioArrayClip:
     samples = max(1, int(duration * fps))
     arr = np.zeros((samples, 2), dtype=np.float32)
     return AudioArrayClip(arr, fps=fps).set_duration(duration)
+
+
+def load_optional_audio(path: str, duration: float, volume: float = 1.0):
+    if not os.path.exists(path):
+        return None
+    try:
+        clip = AudioFileClip(path)
+        if clip.duration > duration:
+            clip = clip.subclip(0, duration)
+        elif clip.duration < duration and clip.duration > 0:
+            loops = int(math.ceil(duration / clip.duration))
+            clip = concatenate_audioclips([clip] * loops).subclip(0, duration)
+        if volume != 1.0:
+            clip = clip.volumex(volume)
+        return clip
+    except Exception as exc:
+        print(f"Warning: failed to load optional audio asset {path}: {exc}")
+        return None
 
 
 def load_voice_clip(script_text: str) -> AudioFileClip | AudioArrayClip:
@@ -459,6 +478,24 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     duration = voice_clip.duration
     fps = 44100
     t = np.linspace(0, duration, max(1, int(duration * fps)), endpoint=False)
+    music_bed = None
+    for ext in ("wav", "mp3", "ogg", "m4a"):
+        music_bed = load_optional_audio(os.path.join(AUDIO_ASSET_DIR, f"music_bed.{ext}"), duration, volume=0.14)
+        if music_bed:
+            print(f"Audio asset: using music_bed.{ext}")
+            break
+    swoosh_asset = None
+    for ext in ("wav", "mp3", "ogg", "m4a"):
+        swoosh_asset = load_optional_audio(os.path.join(AUDIO_ASSET_DIR, f"transition_swoosh.{ext}"), duration, volume=0.16)
+        if swoosh_asset:
+            print(f"Audio asset: using transition_swoosh.{ext}")
+            break
+    hit_asset = None
+    for ext in ("wav", "mp3", "ogg", "m4a"):
+        hit_asset = load_optional_audio(os.path.join(AUDIO_ASSET_DIR, f"impact_hit.{ext}"), duration, volume=0.12)
+        if hit_asset:
+            print(f"Audio asset: using impact_hit.{ext}")
+            break
 
     # Ambient bed with mild ducking envelope to leave room for narration.
     pulse = 0.65 + 0.16 * np.sin(2 * np.pi * 0.09 * t)
@@ -506,8 +543,20 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
 
     voice_base = voice_clip.set_fps(fps) if hasattr(voice_clip, "set_fps") else voice_clip
     layers = [voice_base]
-    for channel in (bed, swoosh, hit):
-        stereo = np.column_stack([channel, channel])
+    if music_bed is not None:
+        layers.append(music_bed)
+    else:
+        stereo = np.column_stack([bed, bed])
+        layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
+    if swoosh_asset is not None:
+        layers.append(swoosh_asset)
+    else:
+        stereo = np.column_stack([swoosh, swoosh])
+        layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
+    if hit_asset is not None:
+        layers.append(hit_asset)
+    else:
+        stereo = np.column_stack([hit, hit])
         layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
     return CompositeAudioClip(layers)
 
