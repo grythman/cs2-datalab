@@ -496,9 +496,9 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     # Ambient bed with mild ducking envelope to leave room for narration.
     pulse = 0.65 + 0.16 * np.sin(2 * np.pi * 0.09 * t)
     bed = (
-        0.0048 * np.sin(2 * np.pi * 92 * t)
-        + 0.0032 * np.sin(2 * np.pi * 184 * t)
-        + 0.0018 * np.sin(2 * np.pi * 276 * t)
+        0.0038 * np.sin(2 * np.pi * 82 * t)
+        + 0.0021 * np.sin(2 * np.pi * 123 * t)
+        + 0.0012 * np.sin(2 * np.pi * 164 * t)
     ).astype(np.float32)
     duck = np.ones_like(t, dtype=np.float32) * 0.72
     for start in scene_starts:
@@ -513,11 +513,11 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     intro_env = np.clip(1.0 - (t / max(intro_len, 0.01)), 0.0, 1.0)
     outro_env = np.clip((t - (duration - outro_len)) / max(outro_len, 0.01), 0.0, 1.0)
 
-    # Intro: brighter, slightly forward energy for first impression.
+    # Intro: soft warm lift, avoid piercing overtones.
     intro_synth = (
-        0.0042 * np.sin(2 * np.pi * 118 * t)
-        + 0.0024 * np.sin(2 * np.pi * 236 * t)
-        + 0.0012 * np.sin(2 * np.pi * 472 * t)
+        0.0026 * np.sin(2 * np.pi * 98 * t)
+        + 0.0015 * np.sin(2 * np.pi * 147 * t)
+        + 0.0009 * np.sin(2 * np.pi * 196 * t)
     ).astype(np.float32)
     intro_lift = 0.92 + 0.18 * np.exp(-2.6 * np.maximum(t, 0.0))
     intro_synth *= (0.25 + 0.75 * np.exp(-2.4 * np.maximum(t, 0))) * intro_env * intro_lift
@@ -525,33 +525,34 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     outro_t = np.maximum(t - (duration - outro_len), 0.0)
     # Outro: darker, calmer texture that settles into CTA/end frame.
     outro_synth = (
-        0.0048 * np.sin(2 * np.pi * 82 * t)
-        + 0.0026 * np.sin(2 * np.pi * 164 * t)
-        + 0.0018 * np.sin(2 * np.pi * (280 + 25 * outro_t) * t)
+        0.0028 * np.sin(2 * np.pi * 72 * t)
+        + 0.0018 * np.sin(2 * np.pi * 108 * t)
+        + 0.0010 * np.sin(2 * np.pi * 144 * t)
     ).astype(np.float32)
     outro_settle = 0.86 + 0.14 * np.clip(outro_t / max(outro_len, 0.01), 0.0, 1.0)
     outro_synth *= (0.35 + 0.65 * np.clip(outro_t / max(outro_len, 0.01), 0.0, 1.0)) * outro_env * outro_settle
 
-    # Hype accent at intro and gentle tail in outro (works with or without assets).
+    # Gentle transient texture to avoid "alarm/beep" feeling.
+    rng = np.random.default_rng(2026)
     intro_hit = np.zeros_like(t, dtype=np.float32)
     intro_hit_mask = (t >= 0.06) & (t < 0.30)
     intro_hit_local = t[intro_hit_mask] - 0.06
-    intro_hit[intro_hit_mask] += 0.0068 * np.sin(2 * np.pi * 190 * intro_hit_local) * np.exp(-8.5 * intro_hit_local)
-    intro_hit[intro_hit_mask] += 0.0042 * np.sin(2 * np.pi * 380 * intro_hit_local) * np.exp(-12.5 * intro_hit_local)
+    intro_noise = rng.normal(0.0, 1.0, intro_hit_local.size).astype(np.float32)
+    intro_hit[intro_hit_mask] += 0.0019 * intro_noise * np.exp(-9.5 * intro_hit_local)
 
     outro_tail = np.zeros_like(t, dtype=np.float32)
     outro_tail_mask = (t >= duration - outro_len) & (t < duration)
     outro_tail_local = t[outro_tail_mask] - (duration - outro_len)
-    outro_tail[outro_tail_mask] += 0.0032 * np.sin(2 * np.pi * 74 * outro_tail_local) * np.exp(-1.6 * outro_tail_local)
-    outro_tail[outro_tail_mask] += 0.0015 * np.sin(2 * np.pi * 148 * outro_tail_local) * np.exp(-1.9 * outro_tail_local)
+    outro_noise = rng.normal(0.0, 1.0, outro_tail_local.size).astype(np.float32)
+    outro_tail[outro_tail_mask] += 0.0011 * outro_noise * np.exp(-2.0 * outro_tail_local)
 
     # Airy transition sweep for scene changes.
     swoosh = np.zeros_like(t, dtype=np.float32)
     for start in scene_starts[1:]:
         mask = (t >= start - 0.03) & (t < start + 0.22)
         local = t[mask] - start
-        sweep = np.sin(2 * np.pi * (160 + 780 * np.maximum(local, 0)) * local)
-        swoosh[mask] += 0.008 * sweep * np.exp(-8 * np.abs(local))
+        sweep = np.sin(2 * np.pi * (120 + 520 * np.maximum(local, 0)) * local)
+        swoosh[mask] += 0.0042 * sweep * np.exp(-9.5 * np.abs(local))
 
     # Scene-specific accents.
     hit = np.zeros_like(t, dtype=np.float32)
@@ -560,20 +561,20 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
         if key == "clutch":
             mask = (t >= start + 0.04) & (t < start + 0.24)
             local = t[mask] - (start + 0.04)
-            hit[mask] += 0.010 * np.sin(2 * np.pi * 180 * local) * np.exp(-10 * local)
-            hit[mask] += 0.008 * np.sin(2 * np.pi * 420 * local) * np.exp(-16 * local)
+            hit[mask] += 0.0048 * np.sin(2 * np.pi * 130 * local) * np.exp(-12 * local)
+            hit[mask] += 0.0026 * np.sin(2 * np.pi * 240 * local) * np.exp(-15 * local)
         elif key in {"heatmap", "deathmap"}:
             mask = (t >= start + 0.08) & (t < start + 0.20)
             local = t[mask] - (start + 0.08)
-            hit[mask] += 0.006 * np.sin(2 * np.pi * 230 * local) * np.exp(-18 * local)
+            hit[mask] += 0.0030 * np.sin(2 * np.pi * 170 * local) * np.exp(-18 * local)
         elif key in {"economy", "utility", "awp"}:
             mask = (t >= start + 0.10) & (t < start + 0.18)
             local = t[mask] - (start + 0.10)
-            hit[mask] += 0.004 * np.sin(2 * np.pi * 320 * local) * np.exp(-20 * local)
+            hit[mask] += 0.0019 * np.sin(2 * np.pi * 190 * local) * np.exp(-20 * local)
         else:
             mask = (t >= start + 0.10) & (t < start + 0.18)
             local = t[mask] - (start + 0.10)
-            hit[mask] += 0.0035 * np.sin(2 * np.pi * 250 * local) * np.exp(-22 * local)
+            hit[mask] += 0.0017 * np.sin(2 * np.pi * 160 * local) * np.exp(-22 * local)
 
     voice_base = voice_clip.set_fps(fps) if hasattr(voice_clip, "set_fps") else voice_clip
     layers = [voice_base]
@@ -583,19 +584,20 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
         stereo = np.column_stack([bed, bed])
         layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
     if intro_bed is not None:
-        layers.append(intro_bed.subclip(0, min(intro_len, intro_bed.duration)).set_start(0).volumex(1.12))
+        layers.append(intro_bed.subclip(0, min(intro_len, intro_bed.duration)).set_start(0).volumex(0.82))
     else:
         stereo = np.column_stack([intro_synth, intro_synth])
         layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
     if outro_bed is not None:
         start_t = max(0.0, duration - min(outro_len, outro_bed.duration))
         end_t = min(outro_bed.duration, start_t + min(outro_len, outro_bed.duration))
-        layers.append(outro_bed.subclip(start_t, end_t).set_start(duration - (end_t - start_t)).volumex(0.88))
+        layers.append(outro_bed.subclip(start_t, end_t).set_start(duration - (end_t - start_t)).volumex(0.76))
     else:
         stereo = np.column_stack([outro_synth, outro_synth])
         layers.append(AudioArrayClip(stereo, fps=fps).set_duration(duration))
-    layers.append(AudioArrayClip(np.column_stack([intro_hit, intro_hit]), fps=fps).set_duration(duration))
-    layers.append(AudioArrayClip(np.column_stack([outro_tail, outro_tail]), fps=fps).set_duration(duration))
+    # Keep these ultra-subtle; they are texture only.
+    layers.append(AudioArrayClip(np.column_stack([intro_hit, intro_hit]), fps=fps).set_duration(duration).volumex(0.45))
+    layers.append(AudioArrayClip(np.column_stack([outro_tail, outro_tail]), fps=fps).set_duration(duration).volumex(0.40))
     if swoosh_asset is not None:
         layers.append(swoosh_asset)
     else:
