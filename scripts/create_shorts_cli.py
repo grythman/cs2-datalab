@@ -487,11 +487,11 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     duration = voice_clip.duration
     fps = 44100
     t = np.linspace(0, duration, max(1, int(duration * fps)), endpoint=False)
-    music_bed = load_optional_audio_any("music_bed", duration, volume=0.14)
-    intro_bed = load_optional_audio_any("music_intro", duration, volume=0.16)
-    outro_bed = load_optional_audio_any("music_outro", duration, volume=0.16)
-    swoosh_asset = load_optional_audio_any("transition_swoosh", duration, volume=0.16)
-    hit_asset = load_optional_audio_any("impact_hit", duration, volume=0.12)
+    music_bed = load_optional_audio_any("music_bed", duration, volume=0.08)
+    intro_bed = load_optional_audio_any("music_intro", duration, volume=0.1)
+    outro_bed = load_optional_audio_any("music_outro", duration, volume=0.1)
+    swoosh_asset = load_optional_audio_any("transition_swoosh", duration, volume=0.1)
+    hit_asset = load_optional_audio_any("impact_hit", duration, volume=0.08)
 
     # Ambient bed with mild ducking envelope to leave room for narration.
     pulse = 0.65 + 0.16 * np.sin(2 * np.pi * 0.09 * t)
