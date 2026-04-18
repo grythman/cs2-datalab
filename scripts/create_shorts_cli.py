@@ -47,14 +47,57 @@ async def generate_voiceover(text: str, output_path: str):
 
 @dataclass
 class SceneSpec:
+    beat: str
     key: str
     title: str
     subtitle: str
+    kicker: str
     image: str
     layout: str
     focus: tuple[float, float]
     blur: int
     motion: tuple[float, float]
+    audio_profile: str
+
+
+ASSET_SCENE_META = {
+    "hook": {"title": "MATCH STORY", "subtitle": "Momentum хаана эргэсэн бэ?", "kicker": "Hook", "layout": "hook", "blur": 14, "motion": (0.02, 0.02), "audio_profile": "hook"},
+    "heatmap": {"title": "MAP PRESSURE", "subtitle": "Тулааны гол бүс mid дээр төвлөрсөн.", "kicker": "Pressure", "layout": "focus", "blur": 20, "motion": (0.00, 0.00), "audio_profile": "analysis"},
+    "firstkill": {"title": "FIRST PICK", "subtitle": "Эхний kill tempo-г нээсэн.", "kicker": "Tempo", "layout": "focus", "blur": 18, "motion": (0.00, 0.00), "audio_profile": "hook"},
+    "deathmap": {"title": "TRADE PATTERN", "subtitle": "Уналт ба trade zone-ууд энд төвлөрсөн.", "kicker": "Proof", "layout": "focus", "blur": 24, "motion": (0.00, 0.00), "audio_profile": "analysis"},
+    "economy": {"title": "ECONOMY SWING", "subtitle": "Мөнгөний edge round tempo-г эвдсэн.", "kicker": "Swing", "layout": "focus", "blur": 18, "motion": (0.00, 0.00), "audio_profile": "pressure"},
+    "utility": {"title": "UTILITY LOAD", "subtitle": "Flash ба smoke control зайг нээсэн.", "kicker": "Setup", "layout": "focus", "blur": 18, "motion": (0.00, 0.00), "audio_profile": "analysis"},
+    "awp": {"title": "AWP CONTROL", "subtitle": "Sniper lane choke point-уудыг түгжсэн.", "kicker": "Proof", "layout": "focus", "blur": 20, "motion": (0.00, 0.00), "audio_profile": "pressure"},
+    "round": {"title": "KEY ROUND", "subtitle": "Momentum shift round map дээр тод харагдана.", "kicker": "Swing", "layout": "focus", "blur": 22, "motion": (0.00, 0.00), "audio_profile": "pressure"},
+    "clutch": {"title": "PAYOFF", "subtitle": "Даралттай мөч төгсгөлийг шийдсэн.", "kicker": "Payoff", "layout": "focus", "blur": 24, "motion": (0.00, 0.00), "audio_profile": "payoff"},
+}
+
+BEAT_PLAN = [
+    ("hook", ["firstkill", "heatmap", "round", "awp"]),
+    ("setup", ["heatmap", "utility", "firstkill", "awp"]),
+    ("proof", ["deathmap", "awp", "heatmap", "round"]),
+    ("swing", ["economy", "round", "utility", "deathmap"]),
+    ("payoff", ["clutch", "firstkill", "round", "awp"]),
+    ("close", ["heatmap", "deathmap", "round", "economy"]),
+]
+
+BEAT_MIN_DURATION = {
+    "hook": 4.2,
+    "setup": 5.0,
+    "proof": 5.8,
+    "swing": 6.2,
+    "payoff": 6.0,
+    "close": 4.4,
+}
+
+BEAT_WEIGHT = {
+    "hook": 0.80,
+    "setup": 1.00,
+    "proof": 1.18,
+    "swing": 1.28,
+    "payoff": 1.20,
+    "close": 0.82,
+}
 
 
 def load_font(path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -147,24 +190,58 @@ def find_assets(match_id: str, map_name: str, heatmap_img: str, awp_img: str) ->
     return {key: path for key, path in assets.items() if path and os.path.exists(path)}
 
 
+def build_scene_copy(key: str, beat: str, stats: dict) -> tuple[str, str, str]:
+    meta = ASSET_SCENE_META[key]
+    title = meta["title"]
+    subtitle = meta["subtitle"]
+    if key == "firstkill":
+        subtitle = f"{stats['first_kill']} эхний pick-ийг нээсэн."
+    elif key == "economy":
+        subtitle = f"{stats['mongolz_kills']}:{stats['mouz_kills']} kill spread дотор money edge тасалж орсон."
+    elif key == "clutch":
+        subtitle = f"{stats['top_fragger']} хамгийн өндөр impact ({stats['top_kills']} frag) үзүүлсэн."
+    elif key == "heatmap":
+        subtitle = f"{stats['rounds']} round-ийн pressure нэг бүсэд давхцсан."
+    kicker = meta["kicker"] if beat not in {"hook", "close"} else beat.upper()
+    return title, subtitle, kicker
+
+
+def pick_scene_key(preferences: list[str], assets: dict[str, str], used: set[str]) -> str | None:
+    for key in preferences:
+        if key in assets and key not in used:
+            return key
+    for key in preferences:
+        if key in assets:
+            return key
+    return None
+
+
 def build_scenes(assets: dict[str, str], stats: dict) -> list[SceneSpec]:
-    base = [
-        ("hook", "MOUZ VS MONGOLZ", "Mirage дээр momentum хаана эргэсэн бэ?", "hook", (0.18, 0.18), 14, (0.03, 0.02)),
-        ("heatmap", "HEATMAP", "Mid дээр тулааны нягтрал хамгийн өндөр.", "focus", (0.50, 0.50), 22, (0.00, 0.00)),
-        ("firstkill", "FIRST KILL", f"{stats['first_kill']} эхний цохилтыг нээсэн.", "split", (0.50, 0.50), 20, (0.00, 0.00)),
-        ("deathmap", "DEATH MAP", "Trade pattern ба уналтын бүсүүд.", "focus", (0.50, 0.50), 26, (0.00, 0.00)),
-        ("economy", "ECONOMY", "Мөнгөний давуу тал tempo-г шийдсэн.", "split", (0.50, 0.50), 18, (0.00, 0.00)),
-        ("utility", "UTILITY", "Flash, smoke pressure map control-ийг нээсэн.", "split", (0.50, 0.50), 20, (0.00, 0.00)),
-        ("awp", "AWP LINES", "Снайперын хяналт choke point-уудыг түгжсэн.", "focus", (0.50, 0.50), 22, (0.00, 0.00)),
-        ("round", "KEY ROUND", "Momentum shift-ийг round map дээр харуулъя.", "focus", (0.50, 0.50), 24, (0.00, 0.00)),
-        ("clutch", "CLUTCH", f"{stats['top_fragger']} даралттай мөчийг хаасан.", "focus", (0.50, 0.50), 28, (0.00, 0.00)),
-    ]
-    scenes = [
-        SceneSpec(key, title, subtitle, assets[key], layout, focus, blur, motion)
-        for key, title, subtitle, layout, focus, blur, motion in base
-        if key in assets
-    ]
-    return scenes[:8] if len(scenes) > 8 else scenes
+    scenes: list[SceneSpec] = []
+    used: set[str] = set()
+    for beat, preferences in BEAT_PLAN:
+        key = pick_scene_key(preferences, assets, used)
+        if key is None:
+            continue
+        used.add(key)
+        meta = ASSET_SCENE_META[key]
+        title, subtitle, kicker = build_scene_copy(key, beat, stats)
+        scenes.append(
+            SceneSpec(
+                beat=beat,
+                key=key,
+                title=title,
+                subtitle=subtitle,
+                kicker=kicker,
+                image=assets[key],
+                layout=meta["layout"],
+                focus=(0.50, 0.50),
+                blur=meta["blur"],
+                motion=meta["motion"],
+                audio_profile=meta["audio_profile"],
+            )
+        )
+    return scenes
 
 
 def safe_json_load(path: str) -> dict:
@@ -332,10 +409,14 @@ def prepare_background(path: str, blur_radius: int) -> Image.Image:
 
 def prepare_focus_image(path: str, layout: str) -> Image.Image:
     image = Image.open(path).convert("RGB")
-    max_w = int(W * 0.92)
-    max_h = int(H * (0.74 if layout == "hook" else 0.66))
+    max_w = int(W * 0.94)
+    max_h = int(H * (0.70 if layout == "hook" else 0.74))
     image.thumbnail((max_w, max_h), Image.LANCZOS)
     return image
+
+
+def build_stat_line(stats: dict) -> str:
+    return f"{stats['rounds']} rounds  |  {stats['mongolz_kills']} vs {stats['mouz_kills']} kills"
 
 
 def build_overlay(scene: SceneSpec, stats: dict, match_id: str, map_name: str, script_chunk: str) -> np.ndarray:
@@ -358,66 +439,47 @@ def build_overlay(scene: SceneSpec, stats: dict, match_id: str, map_name: str, s
     overlay = Image.alpha_composite(overlay, vignette)
     draw = ImageDraw.Draw(overlay)
 
-    draw.rectangle([(0, 0), (W, 8)], fill=accent)
-    rounded(draw, [22, 22, W - 22, 102], 22, (8, 12, 20, 126), outline=accent, width=2)
+    draw.rectangle([(0, 0), (W, 6)], fill=accent)
 
-    title_font = fit_font_size(scene.title, FONT_BOLD, 40, W - 80, 24)
-    subtitle_font = fit_font_size(scene.subtitle, FONT_REG, 20, W - 96, 14)
     tiny_font = load_font(FONT_BOLD, 14)
-    draw_text_with_shadow(draw, (36, 34), "CS2 DATA LAB", tiny_font, accent)
-    draw_text_with_shadow(draw, (36, 56), scene.title, title_font, (250, 252, 255))
-    draw_text_with_shadow(draw, (W - 36 - text_bbox_width(tiny_font, map_name.upper()), 36), map_name.upper(), tiny_font, (190, 196, 208))
+    label_font = load_font(FONT_BOLD, 15)
+    title_font = fit_font_size(scene.title, FONT_BOLD, 42, W - 80, 24)
+    subtitle_font = fit_font_size(scene.subtitle, FONT_BOLD, 26, W - 96, 18)
+    body_font = load_font(FONT_BOLD, 21 if len(script_chunk) < 120 else 19)
 
-    if scene.layout == "hook":
-        rounded(draw, [28, 130, W - 28, 278], 26, (8, 12, 20, 170))
-        hook_big = load_font(FONT_BOLD, 28)
-        stat_font = load_font(FONT_BOLD, 22)
-        draw_text_with_shadow(draw, (46, 150), scene.subtitle, hook_big, (245, 247, 250))
-        draw_text_with_shadow(
-            draw,
-            (46, 206),
-            f"{stats['rounds']} rounds  •  {stats['mongolz_kills']} vs {stats['mouz_kills']} kills",
-            stat_font,
-            accent,
-        )
-        rounded(draw, [28, H - 222, W - 28, H - 76], 26, (8, 12, 20, 196))
-        draw_text_with_shadow(draw, (46, H - 204), "WHY IT MATTERS", tiny_font, (112, 214, 255))
+    rounded(draw, [24, 24, 190, 62], 18, (8, 12, 20, 178), outline=accent, width=2)
+    draw_text_with_shadow(draw, (40, 36), scene.kicker.upper(), label_font, accent)
+    draw_text_with_shadow(draw, (W - 32 - text_bbox_width(tiny_font, map_name.upper()), 38), map_name.upper(), tiny_font, (210, 214, 222))
+
+    rounded(draw, [24, 78, W - 24, 184], 24, (8, 12, 20, 148))
+    draw_text_with_shadow(draw, (40, 98), scene.title, title_font, (248, 250, 252))
+    draw_text_with_shadow(draw, (40, 136), scene.subtitle, subtitle_font, accent)
+
+    if scene.beat == "hook":
+        rounded(draw, [28, H - 250, W - 28, H - 84], 28, (8, 12, 20, 204))
+        draw_text_with_shadow(draw, (44, H - 228), build_stat_line(stats), label_font, accent)
         draw_token_line(
             draw,
-            46,
-            H - 174,
-            f"{stats['first_kill']} эхний kill-ийг нээж, {stats['top_fragger']} хамгийн их frag авсан.",
+            44,
+            H - 190,
+            f"{stats['first_kill']} эхний pick авч, {stats['top_fragger']} хамгийн өндөр frag гаргасан.",
             load_font(FONT_BOLD, 24),
-            W - 92,
+            W - 88,
+            default_fill=(245, 247, 250),
+            line_gap=6,
         )
     else:
-        panel_y = H - (240 if scene.layout == "split" else 220)
-        rounded(draw, [26, panel_y, W - 26, H - 72], 24, (8, 12, 20, 208))
-        draw_text_with_shadow(draw, (44, panel_y + 18), scene.subtitle.upper(), tiny_font, accent)
-        body_font = load_font(FONT_BOLD, 22 if len(script_chunk) < 140 else 20)
-        lines = wrap_text(script_chunk, body_font, W - 92, max_lines=3)
-        line_y = panel_y + 46
+        panel_y = H - 196
+        rounded(draw, [28, panel_y, W - 28, H - 76], 26, (8, 12, 20, 208))
+        lines = wrap_text(script_chunk or scene.subtitle, body_font, W - 88, max_lines=2)
+        line_y = panel_y + 24
         for idx, line in enumerate(lines):
-            fill = (255, 224, 146) if idx == 0 else (245, 247, 250)
-            draw_token_line(draw, 44, line_y, line, body_font, W - 92, default_fill=fill, line_gap=6)
+            fill = accent if idx == 0 and scene.beat in {"payoff", "close"} else (245, 247, 250)
+            draw_token_line(draw, 44, line_y, line, body_font, W - 88, default_fill=fill, line_gap=6)
             line_y += body_font.size + 12
-        if scene.layout == "split":
-            rounded(draw, [28, 126, 332, 220], 22, (8, 12, 20, 196))
-            draw_text_with_shadow(draw, (46, 146), "MATCH SNAPSHOT", tiny_font, accent)
-            draw_text_with_shadow(draw, (46, 172), f"{stats['mongolz_kills']} : {stats['mouz_kills']} kills", load_font(FONT_BOLD, 24), (245, 247, 250))
-            draw_token_line(
-                draw,
-                46,
-                204,
-                f"{stats['top_fragger']} top frag ({stats['top_kills']})",
-                load_font(FONT_BOLD, 16),
-                260,
-                default_fill=(170, 176, 190),
-                line_gap=4,
-            )
+        draw_text_with_shadow(draw, (44, H - 104), build_stat_line(stats), tiny_font, (170, 176, 190))
 
     draw_text_with_shadow(draw, (28, H - 46), match_id.replace("_", " ").upper(), tiny_font, accent)
-    draw_text_with_shadow(draw, (W - 122, H - 46), "CS2 SHORTS", tiny_font, accent)
     return np.array(overlay)
 
 
@@ -451,39 +513,55 @@ def build_scene_clip(scene: SceneSpec, script_chunk: str, stats: dict, match_id:
     return clip
 
 
-def split_chunks_by_weight(lines: list[str], count: int) -> list[str]:
-    if count <= 1:
-        return [" ".join(lines)]
-    if len(lines) <= count:
-        return lines
-    chunks = []
-    total_chars = sum(len(line) for line in lines)
-    target_chars = max(1, total_chars / count)
-    bucket = []
-    bucket_chars = 0
-    for line in lines:
-        bucket.append(line)
-        bucket_chars += len(line)
-        if bucket_chars >= target_chars and len(chunks) < count - 1:
-            chunks.append(" ".join(bucket))
-            bucket = []
-            bucket_chars = 0
-    if bucket:
-        chunks.append(" ".join(bucket))
-    return chunks
+def split_chunks_by_beats(lines: list[str], scenes: list[SceneSpec]) -> list[str]:
+    if not scenes:
+        return []
+    if len(scenes) == 1:
+        return [" ".join(lines)] if lines else [""]
+    if not lines:
+        return [scene.subtitle for scene in scenes]
+
+    weights = [BEAT_WEIGHT.get(scene.beat, 1.0) for scene in scenes]
+    total_chars = sum(len(line) for line in lines) or 1
+    targets = [total_chars * (weight / sum(weights)) for weight in weights]
+
+    chunks: list[str] = []
+    line_index = 0
+    for idx, target in enumerate(targets):
+        if idx == len(targets) - 1:
+            chunk_lines = lines[line_index:]
+        else:
+            chunk_lines = []
+            current_chars = 0
+            while line_index < len(lines):
+                next_line = lines[line_index]
+                projected = current_chars + len(next_line)
+                if chunk_lines and projected > target * 1.15:
+                    break
+                chunk_lines.append(next_line)
+                current_chars = projected
+                line_index += 1
+        chunk = " ".join(chunk_lines).strip()
+        chunks.append(chunk or scenes[idx].subtitle)
+
+    if len(chunks) < len(scenes):
+        chunks.extend(scene.subtitle for scene in scenes[len(chunks):])
+    return chunks[: len(scenes)]
 
 
-def allocate_durations(chunks: list[str], total_duration: float, min_duration: float = 4.2) -> list[float]:
+def allocate_durations(chunks: list[str], total_duration: float, scenes: list[SceneSpec]) -> list[float]:
+    mins = [BEAT_MIN_DURATION.get(scene.beat, 4.5) for scene in scenes]
+    base_total = sum(mins)
+    remaining = max(total_duration - base_total, 0.0)
     weights = []
-    for chunk in chunks:
-        weight = len(chunk) + chunk.count(",") * 12 + chunk.count(".") * 18 + chunk.count("?") * 20 + chunk.count("!") * 20
-        weights.append(max(36, weight))
-    remaining = max(total_duration - min_duration * len(chunks), 0.0)
-    weight_sum = sum(weights) or 1
-    return [min_duration + remaining * (weight / weight_sum) for weight in weights]
+    for chunk, scene in zip(chunks, scenes):
+        text_weight = len(chunk) + chunk.count(",") * 12 + chunk.count(".") * 18 + chunk.count("?") * 20 + chunk.count("!") * 20
+        weights.append(max(30.0, text_weight * BEAT_WEIGHT.get(scene.beat, 1.0)))
+    weight_sum = sum(weights) or 1.0
+    return [minimum + remaining * (weight / weight_sum) for minimum, weight in zip(mins, weights)]
 
 
-def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]) -> CompositeAudioClip:
+def build_audio_mix(voice_clip, scene_starts: list[float], audio_profiles: list[str]) -> CompositeAudioClip:
     duration = voice_clip.duration
     fps = 44100
     t = np.linspace(0, duration, max(1, int(duration * fps)), endpoint=False)
@@ -554,27 +632,23 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
         sweep = np.sin(2 * np.pi * (120 + 520 * np.maximum(local, 0)) * local)
         swoosh[mask] += 0.0042 * sweep * np.exp(-9.5 * np.abs(local))
 
+    profile_map = {
+        "hook": (0.0018, 170, 0.0010, 0.11),
+        "analysis": (0.0011, 120, 0.0006, 0.10),
+        "pressure": (0.0016, 136, 0.0009, 0.12),
+        "payoff": (0.0020, 128, 0.0012, 0.14),
+        "close": (0.0009, 96, 0.0005, 0.10),
+    }
+
     # Scene-specific accents.
     hit = np.zeros_like(t, dtype=np.float32)
     for idx, start in enumerate(scene_starts):
-        key = scene_keys[idx] if idx < len(scene_keys) else "default"
-        if key == "clutch":
-            mask = (t >= start + 0.04) & (t < start + 0.24)
-            local = t[mask] - (start + 0.04)
-            hit[mask] += 0.0048 * np.sin(2 * np.pi * 130 * local) * np.exp(-12 * local)
-            hit[mask] += 0.0026 * np.sin(2 * np.pi * 240 * local) * np.exp(-15 * local)
-        elif key in {"heatmap", "deathmap"}:
-            mask = (t >= start + 0.08) & (t < start + 0.20)
-            local = t[mask] - (start + 0.08)
-            hit[mask] += 0.0030 * np.sin(2 * np.pi * 170 * local) * np.exp(-18 * local)
-        elif key in {"economy", "utility", "awp"}:
-            mask = (t >= start + 0.10) & (t < start + 0.18)
-            local = t[mask] - (start + 0.10)
-            hit[mask] += 0.0019 * np.sin(2 * np.pi * 190 * local) * np.exp(-20 * local)
-        else:
-            mask = (t >= start + 0.10) & (t < start + 0.18)
-            local = t[mask] - (start + 0.10)
-            hit[mask] += 0.0017 * np.sin(2 * np.pi * 160 * local) * np.exp(-22 * local)
+        profile = audio_profiles[idx] if idx < len(audio_profiles) else "analysis"
+        amp_a, freq_a, amp_b, window = profile_map.get(profile, profile_map["analysis"])
+        mask = (t >= start + 0.08) & (t < start + 0.08 + window)
+        local = t[mask] - (start + 0.08)
+        hit[mask] += amp_a * np.sin(2 * np.pi * freq_a * local) * np.exp(-16 * local)
+        hit[mask] += amp_b * np.sin(2 * np.pi * (freq_a * 1.7) * local) * np.exp(-19 * local)
 
     voice_base = voice_clip.set_fps(fps) if hasattr(voice_clip, "set_fps") else voice_clip
     layers = [voice_base]
@@ -611,11 +685,11 @@ def build_audio_mix(voice_clip, scene_starts: list[float], scene_keys: list[str]
     return CompositeAudioClip(layers)
 
 
-def attach_audio(video, voice_clip, scene_starts: list[float], scene_keys: list[str]):
+def attach_audio(video, voice_clip, scene_starts: list[float], audio_profiles: list[str]):
     try:
         has_real_voice = isinstance(voice_clip, AudioFileClip)
         if has_real_voice:
-            mixed_audio = build_audio_mix(voice_clip, scene_starts, scene_keys)
+            mixed_audio = build_audio_mix(voice_clip, scene_starts, audio_profiles)
             print("Audio attach mode: voice + dynamic ambient mix")
             return video.set_audio(mixed_audio)
         voice_primary = voice_clip.set_fps(44100) if hasattr(voice_clip, "set_fps") else voice_clip
@@ -686,7 +760,21 @@ def main():
     assets = find_assets(match_id, map_name, heatmap_img, awp_img)
     scenes = build_scenes(assets, stats)
     if not scenes:
-        scenes = [SceneSpec("hook", "MATCH BREAKDOWN", "Гол мөчүүдийг харцгаая.", heatmap_img, "hook", (0.18, 0.18), 14, (0.03, 0.02))]
+        scenes = [
+            SceneSpec(
+                beat="hook",
+                key="hook",
+                title="MATCH BREAKDOWN",
+                subtitle="Гол мөчүүдийг харцгаая.",
+                kicker="HOOK",
+                image=heatmap_img,
+                layout="hook",
+                focus=(0.18, 0.18),
+                blur=14,
+                motion=(0.03, 0.02),
+                audio_profile="hook",
+            )
+        ]
 
     voice = load_voice_clip(script_text)
     if voice.duration > 55:
@@ -696,8 +784,8 @@ def main():
         voice = voice.subclip(0, target_duration)
 
     sentences = split_sentences(script_text)
-    chunks = split_chunks_by_weight(sentences, len(scenes))
-    durations = allocate_durations(chunks, voice.duration)
+    chunks = split_chunks_by_beats(sentences, scenes)
+    durations = allocate_durations(chunks, voice.duration, scenes)
     scene_starts = []
     current = 0.0
     clips = []
@@ -708,9 +796,9 @@ def main():
         clips.append(clip)
         current += duration
 
-    scene_keys = [scene.key for scene in scenes[: len(scene_starts)]]
+    audio_profiles = [scene.audio_profile for scene in scenes[: len(scene_starts)]]
     video = concatenate_videoclips(clips, method="compose")
-    video = attach_audio(video, voice, scene_starts, scene_keys)
+    video = attach_audio(video, voice, scene_starts, audio_profiles)
 
     os.makedirs(os.path.dirname(output_video), exist_ok=True)
     try:
