@@ -1,9 +1,57 @@
 {
     "match_id": "mouz_vs_mongolz_cluj",
     "map": "de_mirage",
-    "total_kills": 1,
+    "total_kills": 120,
     "valid_kills_with_coords": 120,
     "mid_kills": 29,
     "mid_pct": 24.17,
-    "tactical_assessment": "Strong Mid Presence"
+    "tactical_assessment": "Strong Mid Presence",
+    "primary_angle": {
+        "id": "economy_broke_momentum",
+        "label": "Economy broke the momentum",
+        "score": 0.698,
+        "reason": "39 low-buy and 95 full-buy snapshots show repeated gear swings.",
+        "evidence": {
+            "low_buy_count": 39,
+            "full_buy_count": 95,
+            "economy_samples": 192
+        }
+    },
+    "story_angles": [
+        {
+            "id": "economy_broke_momentum",
+            "label": "Economy broke the momentum",
+            "score": 0.698,
+            "reason": "39 low-buy and 95 full-buy snapshots show repeated gear swings.",
+            "evidence": {
+                "low_buy_count": 39,
+                "full_buy_count": 95,
+                "economy_samples": 192
+            }
+        },
+        {
+            "id": "round_finish_pressure_mattered",
+            "label": "Round finish pressure mattered",
+            "score": 0.45,
+            "reason": "Round-end wins were split {'CT': 9, 'T': 11} across the available rounds.",
+            "evidence": {
+                "round_winners": {
+                    "CT": 9,
+                    "T": 11
+                },
+                "estimated_rounds": 45
+            }
+        },
+        {
+            "id": "mid_control_decided_map",
+            "label": "Mid control decided the map",
+            "score": 0.242,
+            "reason": "24.17% of coordinate-valid kills came from Mirage mid pressure zones.",
+            "evidence": {
+                "mid_pct": 24.17,
+                "mid_kills": 29
+            }
+        }
+    ],
+    "angle_summary": "Economy broke the momentum | Round finish pressure mattered | Mid control decided the map"
 }
